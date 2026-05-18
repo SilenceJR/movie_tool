@@ -1,0 +1,21 @@
+services:
+  movie-tool:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+    container_name: movie-tool
+    ports:
+      - "8080:8080"
+    environment:
+      MOVIE_TOOL_HOST: 0.0.0.0
+      MOVIE_TOOL_PORT: 8080
+      MOVIE_TOOL_DATA_DIR: /config
+      MOVIE_TOOL_CACHE_DIR: /cache
+      MOVIE_TOOL_DATABASE: /config/movie-tool.db
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      - ./strm:/strm
+      - /path/to/media:/media:ro
+    restart: unless-stopped
+

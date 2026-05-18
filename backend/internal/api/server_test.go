@@ -205,6 +205,24 @@ func TestScanLibrary(t *testing.T) {
 	if body["count"].(float64) != 1 {
 		t.Fatalf("expected count 1, got %#v", body["count"])
 	}
+
+	filesResponse := httptest.NewRecorder()
+	filesRequest := httptest.NewRequest(http.MethodGet, "/api/media-files?library_id="+created["id"].(string), nil)
+	server.ServeHTTP(filesResponse, filesRequest)
+	if filesResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing media files, got %d body=%s", filesResponse.Code, filesResponse.Body.String())
+	}
+
+	var files []map[string]any
+	if err := json.NewDecoder(filesResponse.Body).Decode(&files); err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 stored media file, got %d", len(files))
+	}
+	if files[0]["parsed_title"] != "Inception" {
+		t.Fatalf("expected parsed title Inception, got %#v", files[0]["parsed_title"])
+	}
 }
 
 func TestAutomationCRUDAndRun(t *testing.T) {

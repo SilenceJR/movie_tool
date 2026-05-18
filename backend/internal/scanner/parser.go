@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -25,25 +26,27 @@ var (
 )
 
 type ParsedFile struct {
-	LibraryID    string   `json:"library_id"`
-	LibraryName  string   `json:"library_name"`
-	MediaType    string   `json:"media_type"`
-	Path         string   `json:"path"`
-	FileName     string   `json:"file_name"`
-	Extension    string   `json:"extension"`
-	BaseName     string   `json:"base_name"`
-	Title        string   `json:"title"`
-	Year         int      `json:"year"`
-	Season       int      `json:"season"`
-	Episode      int      `json:"episode"`
-	Number       string   `json:"number"`
-	Resolution   string   `json:"resolution"`
-	Source       string   `json:"source"`
-	VideoCodec   string   `json:"video_codec"`
-	AudioCodec   string   `json:"audio_codec"`
-	HDRFormat    string   `json:"hdr_format"`
-	Subtitles    []string `json:"subtitles"`
-	ReleaseGroup string   `json:"release_group"`
+	LibraryID    string    `json:"library_id"`
+	LibraryName  string    `json:"library_name"`
+	MediaType    string    `json:"media_type"`
+	Path         string    `json:"path"`
+	FileName     string    `json:"file_name"`
+	Extension    string    `json:"extension"`
+	BaseName     string    `json:"base_name"`
+	Size         int64     `json:"size"`
+	ModifiedAt   time.Time `json:"modified_at"`
+	Title        string    `json:"title"`
+	Year         int       `json:"year"`
+	Season       int       `json:"season"`
+	Episode      int       `json:"episode"`
+	Number       string    `json:"number"`
+	Resolution   string    `json:"resolution"`
+	Source       string    `json:"source"`
+	VideoCodec   string    `json:"video_codec"`
+	AudioCodec   string    `json:"audio_codec"`
+	HDRFormat    string    `json:"hdr_format"`
+	Subtitles    []string  `json:"subtitles"`
+	ReleaseGroup string    `json:"release_group"`
 }
 
 func ParseFile(path string) ParsedFile {

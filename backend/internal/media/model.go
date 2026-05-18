@@ -63,25 +63,25 @@ type Version struct {
 }
 
 type File struct {
-	ID                string
-	MediaID           string
-	VersionID         string
-	LibraryID         string
-	Path              string
-	NormalizedPath    string
-	FileName          string
-	Extension         string
-	Size              int64
-	ModifiedAt        time.Time
-	Status            FileStatus
-	IsSTRM            bool
-	STRMTarget        string
-	DetectedMediaType string
-	ParsedTitle       string
-	ParsedYear        int
-	ParsedSeason      int
-	ParsedEpisode     int
-	ParsedNumber      string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                string     `json:"id"`
+	MediaID           string     `json:"media_id,omitempty"`
+	VersionID         string     `json:"version_id,omitempty"`
+	LibraryID         string     `json:"library_id"`
+	Path              string     `json:"path"`
+	NormalizedPath    string     `json:"normalized_path"`
+	FileName          string     `json:"file_name"`
+	Extension         string     `json:"extension"`
+	Size              int64      `json:"size"`
+	ModifiedAt        time.Time  `json:"modified_at"`
+	Status            FileStatus `json:"file_status"`
+	IsSTRM            bool       `json:"is_strm"`
+	STRMTarget        string     `json:"strm_target,omitempty"`
+	DetectedMediaType string     `json:"detected_media_type"`
+	ParsedTitle       string     `json:"parsed_title"`
+	ParsedYear        int        `json:"parsed_year"`
+	ParsedSeason      int        `json:"parsed_season"`
+	ParsedEpisode     int        `json:"parsed_episode"`
+	ParsedNumber      string     `json:"parsed_number"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }

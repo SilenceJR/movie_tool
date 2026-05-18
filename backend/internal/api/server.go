@@ -9,6 +9,7 @@ import (
 	"movie-tool/backend/internal/automation"
 	"movie-tool/backend/internal/config"
 	"movie-tool/backend/internal/library"
+	"movie-tool/backend/internal/media"
 	"movie-tool/backend/internal/organizer"
 	"movie-tool/backend/internal/scanner"
 	"movie-tool/backend/internal/task"
@@ -19,12 +20,14 @@ type Server struct {
 	mux         *http.ServeMux
 	automations automation.Store
 	libraries   library.Store
+	mediaFiles  media.Store
 	tasks       *task.Queue
 }
 
 type Dependencies struct {
 	Automations automation.Store
 	Libraries   library.Store
+	MediaFiles  media.Store
 	Tasks       *task.Queue
 }
 
@@ -39,6 +42,9 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 	if deps.Libraries == nil {
 		deps.Libraries = library.NewMemoryStore()
 	}
+	if deps.MediaFiles == nil {
+		deps.MediaFiles = media.NewMemoryStore()
+	}
 	if deps.Tasks == nil {
 		deps.Tasks = task.NewQueue()
 	}
@@ -48,6 +54,7 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 		mux:         http.NewServeMux(),
 		automations: deps.Automations,
 		libraries:   deps.Libraries,
+		mediaFiles:  deps.MediaFiles,
 		tasks:       deps.Tasks,
 	}
 	server.routes()
@@ -71,6 +78,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /api/libraries/", s.handleUpdateLibrary)
 	s.mux.HandleFunc("POST /api/libraries/", s.handleLibraryAction)
 	s.mux.HandleFunc("DELETE /api/libraries/", s.handleDeleteLibrary)
+	s.mux.HandleFunc("GET /api/media-files", s.handleListMediaFiles)
 	s.mux.HandleFunc("GET /api/tasks", s.handleListTasks)
 	s.mux.HandleFunc("POST /api/tasks/", s.handleTaskAction)
 	s.mux.HandleFunc("POST /api/organizer/plan", s.handleCreateOrganizerPlan)
@@ -219,12 +227,50 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 
+	imported := make([]media.File, 0, len(files))
+	for _, file := range files {
+		stored, err := s.mediaFiles.UpsertFile(r.Context(), media.FileInput{
+			LibraryID:         file.LibraryID,
+			Path:              file.Path,
+			FileName:          file.FileName,
+			Extension:         file.Extension,
+			Size:              file.Size,
+			ModifiedAt:        file.ModifiedAt,
+			DetectedMediaType: file.MediaType,
+			ParsedTitle:       file.Title,
+			ParsedYear:        file.Year,
+			ParsedSeason:      file.Season,
+			ParsedEpisode:     file.Episode,
+			ParsedNumber:      file.Number,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		imported = append(imported, stored)
+	}
+
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan library: "+found.Name)
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"task":  taskRecord,
-		"files": files,
-		"count": len(files),
+		"task":     taskRecord,
+		"files":    files,
+		"imported": imported,
+		"count":    len(files),
 	})
+}
+
+func (s *Server) handleListMediaFiles(w http.ResponseWriter, r *http.Request) {
+	libraryID := r.URL.Query().Get("library_id")
+	if libraryID == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("library_id is required"))
+		return
+	}
+	files, err := s.mediaFiles.ListFilesByLibrary(r.Context(), libraryID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, files)
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, _ *http.Request) {

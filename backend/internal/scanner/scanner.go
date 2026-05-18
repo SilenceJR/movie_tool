@@ -73,11 +73,17 @@ func (s Scanner) Walk(request ScanRequest) ([]ParsedFile, error) {
 		if entry.IsDir() || !isMediaFile(entry.Name()) {
 			return nil
 		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
 
 		parsed := ParseFile(path)
 		parsed.LibraryID = request.Library.ID
 		parsed.LibraryName = request.Library.Name
 		parsed.MediaType = request.Library.MediaType
+		parsed.Size = info.Size()
+		parsed.ModifiedAt = info.ModTime()
 		files = append(files, parsed)
 		return nil
 	})

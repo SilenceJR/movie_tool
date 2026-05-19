@@ -838,6 +838,48 @@ func TestSkipOrganizerPlanConflicts(t *testing.T) {
 	}
 }
 
+func TestRenameOrganizerPlanConflicts(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	targetRoot := filepath.Join(root, "library")
+	existingTarget := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p.mkv")
+	existingRenamedTarget := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p (1).mkv")
+	if err := os.MkdirAll(filepath.Dir(existingTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(existingTarget, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(existingRenamedTarget, []byte("existing renamed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Inception","year":2010},
+		"versions":[{"id":"v1","resolution":"1080p"}],
+		"files":[{"id":"f1","media_id":"m1","version_id":"v1","path":"/downloads/Inception.mkv"}],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","conflict_policy":"overwrite_with_confirmation","enabled":true}
+	}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+plan["id"].(string)+"/rename-conflicts", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 rename conflicts, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	updated := body["plan"].(map[string]any)
+	actions := updated["actions"].([]any)
+	action := actions[0].(map[string]any)
+	want := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p (2).mkv")
+	if action["status"] != "pending" || action["target_path"] != want {
+		t.Fatalf("expected pending renamed conflict target %q, got %#v", want, action)
+	}
+}
+
 func TestExecuteOrganizerPlan(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	root := t.TempDir()

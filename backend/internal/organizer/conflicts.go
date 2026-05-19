@@ -20,3 +20,33 @@ func SkipConflicts(plan Plan, now time.Time) (Plan, int) {
 	}
 	return plan, changed
 }
+
+func RenameConflicts(plan Plan, now time.Time, targetExists func(string) bool) (Plan, int) {
+	planner := Planner{TargetExists: targetExists}
+	seenTargets := make(map[string]string, len(plan.Actions))
+	for _, action := range plan.Actions {
+		if action.Status != ActionConflict {
+			seenTargets[action.TargetPath] = action.SourcePath
+		}
+	}
+
+	changed := 0
+	for index, action := range plan.Actions {
+		if action.Status != ActionConflict {
+			continue
+		}
+		action.TargetPath = planner.nextAvailableTarget(action.TargetPath, seenTargets)
+		action.Status = ActionPending
+		action.ConflictReason = ""
+		action.Error = ""
+		seenTargets[action.TargetPath] = action.SourcePath
+		plan.Actions[index] = action
+		changed++
+	}
+	if changed > 0 {
+		plan.Status = PlanReady
+		plan.Summary = SummarizeActions(plan.Actions)
+		plan.UpdatedAt = now.UTC()
+	}
+	return plan, changed
+}

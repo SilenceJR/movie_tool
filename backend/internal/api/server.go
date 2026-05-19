@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -2346,6 +2347,8 @@ func (s *Server) handleOrganizerPlanAction(w http.ResponseWriter, r *http.Reques
 		s.handleRetryOrganizerPlan(w, r, id)
 	case "skip-conflicts":
 		s.handleSkipOrganizerPlanConflicts(w, r, id)
+	case "rename-conflicts":
+		s.handleRenameOrganizerPlanConflicts(w, r, id)
 	case "cancel":
 		s.handleCancelOrganizerPlan(w, r, id)
 	default:
@@ -2426,6 +2429,36 @@ func (s *Server) handleSkipOrganizerPlanConflicts(w http.ResponseWriter, r *http
 	updated, changed := organizer.SkipConflicts(plan, time.Now().UTC())
 	if changed == 0 {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no conflicts to skip"))
+		return
+	}
+	saved, err := s.organizer.UpdatePlan(r.Context(), updated)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plan":    saved,
+		"changed": changed,
+	})
+}
+
+func (s *Server) handleRenameOrganizerPlanConflicts(w http.ResponseWriter, r *http.Request, id string) {
+	plan, ok, err := s.organizer.GetPlan(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	if plan.Status == organizer.PlanSucceeded || plan.Status == organizer.PlanCanceled {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan conflicts cannot be renamed from status %q", plan.Status))
+		return
+	}
+	updated, changed := organizer.RenameConflicts(plan, time.Now().UTC(), pathExists)
+	if changed == 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no conflicts to rename"))
 		return
 	}
 	saved, err := s.organizer.UpdatePlan(r.Context(), updated)
@@ -2862,6 +2895,11 @@ func pathWithinPrefix(path string, prefix string) bool {
 		return strings.HasPrefix(cleanPath, cleanPrefix)
 	}
 	return strings.HasPrefix(cleanPath, cleanPrefix+string(filepath.Separator))
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func parseOptionalTime(value string) (time.Time, error) {

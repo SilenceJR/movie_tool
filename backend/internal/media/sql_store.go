@@ -158,6 +158,10 @@ func (s *SQLStore) ListFiles(ctx context.Context, query FileQuery) ([]File, erro
 		where += " AND library_id = ?"
 		args = append(args, query.LibraryID)
 	}
+	if query.MediaID != "" {
+		where += " AND media_id = ?"
+		args = append(args, query.MediaID)
+	}
 	if query.Status != "" {
 		where += " AND file_status = ?"
 		args = append(args, string(query.Status))

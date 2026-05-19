@@ -21,6 +21,7 @@ type Store interface {
 
 type FileQuery struct {
 	LibraryID string
+	MediaID   string
 	Status    FileStatus
 }
 
@@ -121,6 +122,9 @@ func (s *MemoryStore) ListFiles(_ context.Context, query FileQuery) ([]File, err
 	files := make([]File, 0)
 	for _, file := range s.files {
 		if query.LibraryID != "" && file.LibraryID != query.LibraryID {
+			continue
+		}
+		if query.MediaID != "" && file.MediaID != query.MediaID {
 			continue
 		}
 		if query.Status != "" && file.Status != query.Status {

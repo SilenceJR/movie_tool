@@ -53,6 +53,7 @@ backend/internal/task         任务系统
 - 已有 `/api/tasks` 列表、日志、取消、retry 入口；扫描/清理这类同步执行的 API 会记录 running/succeeded/failed 状态和任务日志。
 - 已有 `/api/organizer/plan` dry-run 整理计划入口。
 - 已有 `/api/libraries/{id}/scan` 扫描入口，会递归发现媒体文件，创建或复用 media item/version，写入 `media_files`，并标记缺失文件。
+- 已有 `/api/download-directories` CRUD 和 `/api/download-directories/{id}/scan`；下载目录可绑定目标媒体库，扫描完成目录文件并作为待整理来源入库。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs；生产入口使用 SQL store，手动 run 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
 - 已有媒体文件解析器。
@@ -75,7 +76,8 @@ backend/internal/task         任务系统
 - 已有 dry-run 文件整理计划器：输入媒体基础信息、版本信息、文件列表和 Rule，输出 Plan 与待执行 Actions。
 - 默认支持 movie、tv、av 模板；Rule 未指定模板时按媒体类型补齐默认模板。
 - planner 只生成计划，不执行真实移动、复制或链接操作；同一媒体的多版本文件会落入同一媒体目录。
-- 当前 `POST /api/organizer/plan` 仍需要调用方显式传入 media/versions/files，后续应支持基于 `media_id` 或 `library_id` 自动从库内数据组装 dry-run。
+- `POST /api/organizer/plan` 可显式传入 media/versions/files，也已支持 `rule_id + media_id` 自动从 catalog/media_files 组装 dry-run，可把下载目录来源文件按规则预览为 hardlink/symlink/move/copy 到目标媒体库目录。
+- 仍需补齐 `rule_id + library_id` 批量组装、磁盘冲突检测和真实执行器。
 
 ### scanner
 
@@ -95,8 +97,9 @@ backend/internal/task         任务系统
 
 ```text
 1. 将到期 automation tick 接入 API/server 生命周期，并记录 automation_runs。
-2. 扩展 organizer dry-run API，支持 rule_id + media_id/library_id 自动组装计划。
-3. 为 organizer plan 增加磁盘冲突检测和 conflict_policy dry-run 预演。
-4. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
-5. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
+2. 为下载目录接入真实 watcher，文件创建/完成后自动触发扫描与匹配流程。
+3. 扩展 organizer dry-run API，支持 rule_id + library_id 批量组装计划。
+4. 为 organizer plan 增加磁盘冲突检测和 conflict_policy dry-run 预演。
+5. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
+6. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
 ```

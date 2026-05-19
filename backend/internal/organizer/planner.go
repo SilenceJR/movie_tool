@@ -55,11 +55,13 @@ type FileInfo struct {
 }
 
 type PlanRequest struct {
-	Media    MediaInfo     `json:"media"`
-	Versions []VersionInfo `json:"versions"`
-	Files    []FileInfo    `json:"files"`
-	RuleID   string        `json:"rule_id"`
-	Rule     Rule          `json:"rule"`
+	MediaID   string        `json:"media_id"`
+	LibraryID string        `json:"library_id"`
+	Media     MediaInfo     `json:"media"`
+	Versions  []VersionInfo `json:"versions"`
+	Files     []FileInfo    `json:"files"`
+	RuleID    string        `json:"rule_id"`
+	Rule      Rule          `json:"rule"`
 }
 
 type Planner struct {

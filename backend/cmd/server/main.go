@@ -10,6 +10,7 @@ import (
 	"movie-tool/backend/internal/catalog"
 	"movie-tool/backend/internal/config"
 	"movie-tool/backend/internal/database"
+	"movie-tool/backend/internal/download"
 	"movie-tool/backend/internal/integration"
 	"movie-tool/backend/internal/library"
 	"movie-tool/backend/internal/localization"
@@ -33,6 +34,7 @@ func main() {
 		AI:           ai.NewSQLStore(db),
 		Automations:  automation.NewSQLStore(db),
 		Catalog:      catalog.NewSQLStore(db),
+		Downloads:    download.NewSQLStore(db),
 		Integrations: integration.NewSQLStore(db),
 		Libraries:    library.NewSQLStore(db),
 		Localization: localization.NewSQLStore(db),

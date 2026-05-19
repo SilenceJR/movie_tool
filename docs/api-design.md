@@ -32,7 +32,34 @@ POST /api/libraries/{id}/watch/start
 POST /api/libraries/{id}/watch/stop
 ```
 
-## 4. 媒体
+## 4. 下载目录
+
+下载目录用于接入 BT/PT/网盘等完成目录。目录中的文件会作为待整理来源扫描入库，匹配到媒体后可通过 organizer 规则 dry-run 出硬链、软链、移动或复制到目标媒体库目录的动作。
+
+```http
+GET /api/download-directories
+POST /api/download-directories
+GET /api/download-directories/{id}
+PATCH /api/download-directories/{id}
+DELETE /api/download-directories/{id}
+POST /api/download-directories/{id}/scan
+```
+
+创建下载目录示例：
+
+```json
+{
+  "name": "PT 完成目录",
+  "path": "/downloads/complete",
+  "library_id": "library_movies",
+  "media_type": "movie",
+  "action_mode": "hardlink",
+  "enabled": true,
+  "watch_enabled": true
+}
+```
+
+## 5. 媒体
 
 ```http
 GET /api/media
@@ -65,7 +92,7 @@ page_size
 sort
 ```
 
-## 5. 刮削候选
+## 6. 刮削候选
 
 ```http
 GET /api/media/{id}/scrape-candidates
@@ -86,7 +113,7 @@ POST /api/media/{id}/scrape-candidates/manual
 }
 ```
 
-## 6. AI
+## 7. AI
 
 ```http
 GET /api/ai/providers
@@ -99,7 +126,7 @@ POST /api/media/{id}/ai/translate
 POST /api/media/{id}/ai/normalize-tags
 ```
 
-## 7. 翻译
+## 8. 翻译
 
 ```http
 POST /api/media/{id}/translate
@@ -109,7 +136,7 @@ POST /api/media/{id}/translations/{translationId}/lock
 POST /api/media/{id}/translations/{translationId}/unlock
 ```
 
-## 8. 合集
+## 9. 合集
 
 ```http
 GET /api/collections
@@ -122,7 +149,7 @@ DELETE /api/collections/{id}/items/{mediaId}
 POST /api/collections/rules/run
 ```
 
-## 9. 人物、组织、标签
+## 10. 人物、组织、标签
 
 ```http
 GET /api/people
@@ -139,7 +166,7 @@ POST /api/tags/merge
 GET /api/tags/{id}/media
 ```
 
-## 10. STRM
+## 11. STRM
 
 ```http
 GET /api/strm/rules
@@ -150,7 +177,7 @@ POST /api/strm/generate
 POST /api/strm/validate
 ```
 
-## 11. 文件整理
+## 12. 文件整理
 
 ```http
 GET /api/organizer/rules
@@ -193,7 +220,7 @@ rename
 overwrite_with_confirmation
 ```
 
-## 12. 外部服务器集成
+## 13. 外部服务器集成
 
 ```http
 GET /api/integrations
@@ -204,7 +231,7 @@ POST /api/integrations/{id}/test
 POST /api/integrations/{id}/refresh
 ```
 
-## 13. 任务
+## 14. 任务
 
 ```http
 GET /api/tasks
@@ -215,7 +242,7 @@ GET /api/tasks/{id}/logs
 GET /api/events
 ```
 
-## 14. 自动化
+## 15. 自动化
 
 ```http
 GET /api/automations

@@ -11,6 +11,7 @@ import (
 	"movie-tool/backend/internal/automation"
 	"movie-tool/backend/internal/catalog"
 	"movie-tool/backend/internal/config"
+	"movie-tool/backend/internal/download"
 	"movie-tool/backend/internal/integration"
 	"movie-tool/backend/internal/library"
 	"movie-tool/backend/internal/localization"
@@ -30,6 +31,7 @@ type Server struct {
 	ai           ai.Store
 	automations  automation.Store
 	catalog      catalog.Store
+	downloads    download.Store
 	integrations integration.Store
 	libraries    library.Store
 	localization localization.Store
@@ -44,6 +46,7 @@ type Dependencies struct {
 	AI           ai.Store
 	Automations  automation.Store
 	Catalog      catalog.Store
+	Downloads    download.Store
 	Integrations integration.Store
 	Libraries    library.Store
 	Localization localization.Store
@@ -67,6 +70,9 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 	}
 	if deps.Catalog == nil {
 		deps.Catalog = catalog.NewMemoryStore()
+	}
+	if deps.Downloads == nil {
+		deps.Downloads = download.NewMemoryStore()
 	}
 	if deps.Integrations == nil {
 		deps.Integrations = integration.NewMemoryStore()
@@ -99,6 +105,7 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 		ai:           deps.AI,
 		automations:  deps.Automations,
 		catalog:      deps.Catalog,
+		downloads:    deps.Downloads,
 		integrations: deps.Integrations,
 		libraries:    deps.Libraries,
 		localization: deps.Localization,
@@ -141,6 +148,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /api/libraries/", s.handleUpdateLibrary)
 	s.mux.HandleFunc("POST /api/libraries/", s.handleLibraryAction)
 	s.mux.HandleFunc("DELETE /api/libraries/", s.handleDeleteLibrary)
+	s.mux.HandleFunc("GET /api/download-directories", s.handleListDownloadDirectories)
+	s.mux.HandleFunc("POST /api/download-directories", s.handleCreateDownloadDirectory)
+	s.mux.HandleFunc("GET /api/download-directories/", s.handleGetDownloadDirectory)
+	s.mux.HandleFunc("PATCH /api/download-directories/", s.handleUpdateDownloadDirectory)
+	s.mux.HandleFunc("POST /api/download-directories/", s.handleDownloadDirectoryAction)
+	s.mux.HandleFunc("DELETE /api/download-directories/", s.handleDeleteDownloadDirectory)
 	s.mux.HandleFunc("GET /api/media-files", s.handleListMediaFiles)
 	s.mux.HandleFunc("GET /api/media", s.handleListMedia)
 	s.mux.HandleFunc("POST /api/media", s.handleCreateMedia)
@@ -640,6 +653,205 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		"imported":      imported,
 		"count":         len(files),
 		"missing_count": missingCount,
+	})
+}
+
+func (s *Server) handleListDownloadDirectories(w http.ResponseWriter, r *http.Request) {
+	directories, err := s.downloads.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, directories)
+}
+
+func (s *Server) handleCreateDownloadDirectory(w http.ResponseWriter, r *http.Request) {
+	var input download.DirectoryInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if _, ok, err := s.libraries.Get(r.Context(), input.LibraryID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	} else if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("target library not found"))
+		return
+	}
+	directory, err := s.downloads.Create(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, directory)
+}
+
+func (s *Server) handleGetDownloadDirectory(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/download-directories/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	directory, ok, err := s.downloads.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("download directory not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, directory)
+}
+
+func (s *Server) handleUpdateDownloadDirectory(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/download-directories/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var input download.DirectoryUpdate
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if input.LibraryID != nil {
+		if _, ok, err := s.libraries.Get(r.Context(), *input.LibraryID); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		} else if !ok {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("target library not found"))
+			return
+		}
+	}
+	directory, ok, err := s.downloads.Update(r.Context(), id, input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("download directory not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, directory)
+}
+
+func (s *Server) handleDeleteDownloadDirectory(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/download-directories/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	deleted, err := s.downloads.Delete(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !deleted {
+		writeError(w, http.StatusNotFound, fmt.Errorf("download directory not found"))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleDownloadDirectoryAction(w http.ResponseWriter, r *http.Request) {
+	id, action, err := pathIDAction(r.URL.Path, "/api/download-directories/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	switch action {
+	case "scan":
+		s.handleScanDownloadDirectory(w, r, id)
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported download directory action %q", action))
+	}
+}
+
+func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Request, id string) {
+	directory, ok, err := s.downloads.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("download directory not found"))
+		return
+	}
+	if !directory.Enabled {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("download directory is disabled"))
+		return
+	}
+	targetLibrary, ok, err := s.libraries.Get(r.Context(), directory.LibraryID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("target library not found"))
+		return
+	}
+
+	mediaType := firstNonEmpty(directory.MediaType, string(targetLibrary.MediaType))
+	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan download directory: "+directory.Name)
+	taskRecord, _ = s.tasks.Start(taskRecord.ID)
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "walking "+directory.Path)
+
+	files, err := scanner.NewScanner().Walk(scanner.ScanRequest{
+		Root: directory.Path,
+		Library: scanner.LibraryInfo{
+			ID:        targetLibrary.ID,
+			Name:      targetLibrary.Name,
+			Path:      directory.Path,
+			MediaType: mediaType,
+		},
+	})
+	if err != nil {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	imported := make([]media.File, 0, len(files))
+	for _, file := range files {
+		mediaID, versionID, err := s.ensureCatalogVersionForParsedFile(r.Context(), file)
+		if err != nil {
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		stored, err := s.mediaFiles.UpsertFile(r.Context(), media.FileInput{
+			MediaID:           mediaID,
+			VersionID:         versionID,
+			LibraryID:         file.LibraryID,
+			Path:              file.Path,
+			FileName:          file.FileName,
+			Extension:         file.Extension,
+			Size:              file.Size,
+			ModifiedAt:        file.ModifiedAt,
+			DetectedMediaType: file.MediaType,
+			ParsedTitle:       file.Title,
+			ParsedYear:        file.Year,
+			ParsedSeason:      file.Season,
+			ParsedEpisode:     file.Episode,
+			ParsedNumber:      file.Number,
+		})
+		if err != nil {
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		imported = append(imported, stored)
+	}
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("imported %d download files", len(imported)))
+	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, fmt.Sprintf("scan download directory: %s (%d files)", directory.Name, len(imported)))
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task":               taskRecord,
+		"download_directory": directory,
+		"target_library":     targetLibrary,
+		"files":              files,
+		"imported":           imported,
+		"count":              len(imported),
 	})
 }
 
@@ -1834,6 +2046,14 @@ func (s *Server) handleCreateOrganizerPlan(w http.ResponseWriter, r *http.Reques
 		}
 		input.Rule = rule
 	}
+	if input.MediaID != "" && input.Media.ID == "" {
+		built, err := s.organizerPlanRequestFromMedia(r.Context(), input)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		input = built
+	}
 	plan, err := organizer.NewPlanner().Build(input)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -1845,6 +2065,70 @@ func (s *Server) handleCreateOrganizerPlan(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusCreated, saved)
+}
+
+func (s *Server) organizerPlanRequestFromMedia(ctx context.Context, input organizer.PlanRequest) (organizer.PlanRequest, error) {
+	item, ok, err := s.catalog.GetItem(ctx, input.MediaID)
+	if err != nil {
+		return organizer.PlanRequest{}, err
+	}
+	if !ok {
+		return organizer.PlanRequest{}, fmt.Errorf("media item not found")
+	}
+	versions, err := s.catalog.ListVersions(ctx, item.ID)
+	if err != nil {
+		return organizer.PlanRequest{}, err
+	}
+	files, err := s.mediaFiles.ListFiles(ctx, media.FileQuery{LibraryID: item.LibraryID, MediaID: item.ID, Status: media.FileStatusAvailable})
+	if err != nil {
+		return organizer.PlanRequest{}, err
+	}
+	if len(files) == 0 {
+		return organizer.PlanRequest{}, fmt.Errorf("media item has no available files")
+	}
+
+	input.Media = organizer.MediaInfo{
+		ID:            item.ID,
+		LibraryID:     item.LibraryID,
+		MediaType:     item.MediaType,
+		Title:         item.Title,
+		OriginalTitle: item.OriginalTitle,
+		DisplayTitle:  item.DisplayTitle,
+		Year:          item.Year,
+	}
+	input.Versions = make([]organizer.VersionInfo, 0, len(versions))
+	for _, version := range versions {
+		input.Versions = append(input.Versions, organizer.VersionInfo{
+			ID:           version.ID,
+			Name:         version.Name,
+			Resolution:   version.Resolution,
+			Source:       version.Source,
+			VideoCodec:   version.VideoCodec,
+			AudioCodec:   version.AudioCodec,
+			HDRFormat:    version.HDRFormat,
+			Edition:      version.Edition,
+			ReleaseGroup: version.ReleaseGroup,
+			IsDefault:    version.IsDefault,
+		})
+	}
+	input.Files = make([]organizer.FileInfo, 0, len(files))
+	for _, file := range files {
+		input.Files = append(input.Files, organizer.FileInfo{
+			ID:        file.ID,
+			MediaID:   file.MediaID,
+			VersionID: file.VersionID,
+			Path:      file.Path,
+			FileName:  file.FileName,
+			Extension: file.Extension,
+			Season:    file.ParsedSeason,
+			Episode:   file.ParsedEpisode,
+			Number:    file.ParsedNumber,
+		})
+	}
+	if input.LibraryID == "" {
+		input.LibraryID = item.LibraryID
+	}
+	return input, nil
 }
 
 func (s *Server) handleGetOrganizerPlan(w http.ResponseWriter, r *http.Request) {

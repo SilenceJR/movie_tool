@@ -143,6 +143,31 @@ CREATE TABLE media_files (
 );
 ```
 
+### download_directories
+
+```sql
+CREATE TABLE download_directories (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  media_type TEXT,
+  action_mode TEXT NOT NULL DEFAULT 'hardlink',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  watch_enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (library_id) REFERENCES libraries(id)
+);
+```
+
+说明：
+
+- `path` 是下载完成目录或中转目录，不等同于媒体库目标目录。
+- `library_id` 指向整理后的目标媒体库，用于确定分类和默认媒体类型。
+- `action_mode` 表示匹配后默认整理动作，可为 `move`、`copy`、`hardlink`、`symlink`。
+- `watch_enabled` 表示该目录后续可被 watcher 监听；当前实现先支持配置与扫描入口。
+
 ### organizer_rules
 
 ```sql

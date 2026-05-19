@@ -1004,6 +1004,85 @@ func TestScanLibraryMarksMissingFiles(t *testing.T) {
 	}
 }
 
+func TestDownloadDirectoryScanAndOrganizerPlan(t *testing.T) {
+	mediaRoot := t.TempDir()
+	downloadRoot := t.TempDir()
+	downloadPath := filepath.Join(downloadRoot, "Inception.2010.1080p.WEB-DL.H264-GROUP.mkv")
+	if err := os.WriteFile(downloadPath, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+mediaRoot+`"}`)
+	downloadDir := createJSON(t, server, "/api/download-directories", `{
+		"name":"Completed",
+		"path":"`+downloadRoot+`",
+		"library_id":"`+library["id"].(string)+`",
+		"action_mode":"hardlink",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+
+	scanResponse := httptest.NewRecorder()
+	scanRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/"+downloadDir["id"].(string)+"/scan", nil)
+	server.ServeHTTP(scanResponse, scanRequest)
+	if scanResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 download scan, got %d body=%s", scanResponse.Code, scanResponse.Body.String())
+	}
+	var scanBody map[string]any
+	if err := json.NewDecoder(scanResponse.Body).Decode(&scanBody); err != nil {
+		t.Fatal(err)
+	}
+	imported := scanBody["imported"].([]any)
+	if len(imported) != 1 {
+		t.Fatalf("expected 1 imported download file, got %d", len(imported))
+	}
+	file := imported[0].(map[string]any)
+	mediaID := file["media_id"].(string)
+	if mediaID == "" {
+		t.Fatalf("expected download scan to link media, got %#v", file)
+	}
+
+	rule := createJSON(t, server, "/api/organizer/rules", `{
+		"name":"Movies hardlink",
+		"library_id":"`+library["id"].(string)+`",
+		"media_type":"movie",
+		"target_root":"`+mediaRoot+`",
+		"action_mode":"hardlink",
+		"conflict_policy":"skip",
+		"enabled":true
+	}`)
+
+	planResponse := httptest.NewRecorder()
+	planRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/organizer/plan",
+		bytes.NewBufferString(`{"rule_id":"`+rule["id"].(string)+`","media_id":"`+mediaID+`"}`),
+	)
+	server.ServeHTTP(planResponse, planRequest)
+	if planResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 organizer plan, got %d body=%s", planResponse.Code, planResponse.Body.String())
+	}
+	var plan map[string]any
+	if err := json.NewDecoder(planResponse.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	actions := plan["actions"].([]any)
+	if len(actions) != 1 {
+		t.Fatalf("expected one organize action, got %d", len(actions))
+	}
+	action := actions[0].(map[string]any)
+	if action["action_type"] != "hardlink" {
+		t.Fatalf("expected hardlink action, got %#v", action["action_type"])
+	}
+	if action["source_path"] != downloadPath {
+		t.Fatalf("expected source download path, got %#v", action["source_path"])
+	}
+	if !strings.HasPrefix(action["target_path"].(string), mediaRoot) {
+		t.Fatalf("expected target under media root, got %#v", action["target_path"])
+	}
+}
+
 func TestAutomationCRUDAndRun(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

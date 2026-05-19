@@ -128,6 +128,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+func (s *Server) StartAutomationTicker(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				_, _ = s.RunDueAutomations(ctx, now.UTC())
+			}
+		}
+	}()
+}
+
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
@@ -2312,11 +2330,24 @@ func (s *Server) handleRunDueAutomations(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	enabled := true
-	automations, err := s.automations.ListByQuery(r.Context(), automation.Query{Enabled: &enabled})
+	results, err := s.RunDueAutomations(r.Context(), now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"now":     now,
+		"count":   len(results),
+		"results": results,
+	})
+}
+
+func (s *Server) RunDueAutomations(ctx context.Context, now time.Time) ([]map[string]any, error) {
+	enabled := true
+	automations, err := s.automations.ListByQuery(ctx, automation.Query{Enabled: &enabled})
+	if err != nil {
+		return nil, err
 	}
 
 	results := make([]map[string]any, 0)
@@ -2324,7 +2355,7 @@ func (s *Server) handleRunDueAutomations(w http.ResponseWriter, r *http.Request)
 		if item.NextRunAt == nil || item.NextRunAt.After(now) {
 			continue
 		}
-		taskRecord, run, err := s.queueAutomationRun(r.Context(), item)
+		taskRecord, run, err := s.queueAutomationRun(ctx, item)
 		result := map[string]any{"automation": item}
 		if err != nil {
 			result["error"] = err.Error()
@@ -2334,12 +2365,7 @@ func (s *Server) handleRunDueAutomations(w http.ResponseWriter, r *http.Request)
 		}
 		results = append(results, result)
 	}
-
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"now":     now,
-		"count":   len(results),
-		"results": results,
-	})
+	return results, nil
 }
 
 func (s *Server) handleGetAutomation(w http.ResponseWriter, r *http.Request) {

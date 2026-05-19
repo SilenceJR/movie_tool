@@ -69,7 +69,7 @@ backend/internal/task         任务系统
 - 已有 `Store` 接口和内存版 `MemoryStore`，支持自动化规则 List/Get/Create/Update/Delete。
 - `MemoryStore` 默认创建启用的自动化，并基于 `NextRun` 自动维护 `next_run_at`；暂停时清空，恢复或修改计划时重新计算。
 - 已支持 `RecordRun`/`ListRuns` 记录自动化运行历史；API server 已接入内存与 SQL store。
-- 已有 `POST /api/automations/run-due` 可触发到期规则并记录运行历史；调度器当前仍未在生产启动流程中作为后台 ticker 常驻运行，下一步需要把 due automation tick 接入 server 生命周期。
+- 已有 `POST /api/automations/run-due` 可触发到期规则并记录运行历史；生产入口会启动后台 ticker，定期触发到期自动化。
 
 ### organizer
 
@@ -98,10 +98,9 @@ backend/internal/task         任务系统
 ## 4. 下一步建议
 
 ```text
-1. 将到期 automation tick 接入 server 生命周期，作为后台 ticker 常驻运行。
-2. 为下载目录接入真实 watcher，文件创建/完成后自动触发扫描与匹配流程。
-3. 扩展 organizer dry-run API，支持 rule_id + library_id 批量组装计划。
-4. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
-5. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
-6. 为 organizer 执行结果增加回滚/重试和更细的失败恢复。
+1. 为下载目录接入真实 watcher，文件创建/完成后自动触发扫描与匹配流程。
+2. 扩展 organizer dry-run API，支持 rule_id + library_id 批量组装计划。
+3. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
+4. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
+5. 为 organizer 执行结果增加回滚/重试和更细的失败恢复。
 ```

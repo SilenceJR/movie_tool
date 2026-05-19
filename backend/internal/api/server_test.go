@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"movie-tool/backend/internal/config"
+	"movie-tool/backend/internal/task"
 )
 
 func TestHealth(t *testing.T) {
@@ -1308,6 +1310,33 @@ func TestRunDueAutomations(t *testing.T) {
 	}
 	if len(runs) != 1 {
 		t.Fatalf("expected one run, got %d", len(runs))
+	}
+}
+
+func TestRunDueAutomationsServiceMethod(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+
+	created := createJSON(t, server, "/api/automations", `{
+		"name":"Due Cleanup",
+		"automation_type":"cleanup_missing",
+		"schedule_type":"interval",
+		"schedule":"1h"
+	}`)
+	nextRunAt, err := time.Parse(time.RFC3339Nano, created["next_run_at"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := server.RunDueAutomations(context.Background(), nextRunAt.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one due result, got %#v", results)
+	}
+	taskBody := results[0]["task"].(task.Task)
+	if taskBody.Type != task.TypeCleanupMissing {
+		t.Fatalf("expected cleanup_missing task, got %#v", taskBody)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	"movie-tool/backend/internal/ai"
 	"movie-tool/backend/internal/api"
@@ -44,6 +45,7 @@ func main() {
 		STRM:         strm.NewSQLStore(db),
 		Tasks:        task.NewQueueWithStore(task.NewSQLStore(db)),
 	})
+	server.StartAutomationTicker(context.Background(), time.Minute)
 
 	log.Printf("movie-tool backend listening on %s", cfg.Addr())
 	if err := server.ListenAndServe(); err != nil {

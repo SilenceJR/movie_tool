@@ -16,6 +16,5 @@ services:
       - ./config:/config
       - ./cache:/cache
       - ./strm:/strm
-      - /path/to/media:/media:ro
+      - ${MOVIE_TOOL_MEDIA_DIR:-./media}:/media:ro
     restart: unless-stopped
-

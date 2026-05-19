@@ -68,6 +68,7 @@ type PlanRequest struct {
 	FileStatus          string        `json:"file_status"`
 	SourcePathPrefix    string        `json:"source_path_prefix"`
 	DownloadDirectoryID string        `json:"download_directory_id"`
+	ActionStatus        string        `json:"action_status"`
 	Media               MediaInfo     `json:"media"`
 	Versions            []VersionInfo `json:"versions"`
 	Files               []FileInfo    `json:"files"`
@@ -142,6 +143,21 @@ func (p Planner) Build(request PlanRequest) (Plan, error) {
 
 	plan.Summary = summarize(plan.Actions)
 	return plan, nil
+}
+
+func FilterPlanActions(plan Plan, status ActionStatus) Plan {
+	if status == "" {
+		return plan
+	}
+	filtered := plan.Actions[:0]
+	for _, action := range plan.Actions {
+		if action.Status == status {
+			filtered = append(filtered, action)
+		}
+	}
+	plan.Actions = filtered
+	plan.Summary = summarize(plan.Actions)
+	return plan
 }
 
 func (p Planner) now() time.Time {

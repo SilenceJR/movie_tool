@@ -64,6 +64,56 @@ func TestQueueMissingHandler(t *testing.T) {
 	}
 }
 
+func TestQueueManualLifecycle(t *testing.T) {
+	queue := NewQueue()
+	created := queue.Enqueue(TypeLibraryScan, "scan")
+
+	running, ok := queue.Start(created.ID)
+	if !ok {
+		t.Fatal("expected start to find task")
+	}
+	if running.Status != StatusRunning {
+		t.Fatalf("expected running, got %s", running.Status)
+	}
+
+	done, ok := queue.Succeed(created.ID, "scan complete")
+	if !ok {
+		t.Fatal("expected succeed to find task")
+	}
+	if done.Status != StatusSucceeded || done.Progress != 100 {
+		t.Fatalf("expected succeeded 100, got %#v", done)
+	}
+	if done.Message != "scan complete" {
+		t.Fatalf("expected updated message, got %q", done.Message)
+	}
+
+	logs := queue.Logs(created.ID)
+	if len(logs) != 3 {
+		t.Fatalf("expected queued/start/success logs, got %d", len(logs))
+	}
+}
+
+func TestQueueManualFailure(t *testing.T) {
+	queue := NewQueue()
+	created := queue.Enqueue(TypeLibraryScan, "scan")
+
+	failed, ok := queue.Fail(created.ID, errors.New("walk failed"))
+	if !ok {
+		t.Fatal("expected fail to find task")
+	}
+	if failed.Status != StatusFailed {
+		t.Fatalf("expected failed, got %s", failed.Status)
+	}
+	if failed.Error != "walk failed" {
+		t.Fatalf("expected walk failed error, got %q", failed.Error)
+	}
+
+	logs := queue.Logs(created.ID)
+	if logs[1].Level != LogLevelError || logs[1].Message != "walk failed" {
+		t.Fatalf("expected error log, got %#v", logs[1])
+	}
+}
+
 func TestQueueCancel(t *testing.T) {
 	queue := NewQueue()
 	created := queue.Enqueue(TypeLibraryScan, "scan")

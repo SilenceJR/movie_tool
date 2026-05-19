@@ -587,6 +587,9 @@ func TestGetTask(t *testing.T) {
 	}
 	taskBody := scanBody["task"].(map[string]any)
 	taskID := taskBody["id"].(string)
+	if taskBody["status"] != "succeeded" {
+		t.Fatalf("expected completed scan task, got %#v", taskBody["status"])
+	}
 
 	getResponse := httptest.NewRecorder()
 	getRequest := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskID, nil)
@@ -608,6 +611,9 @@ func TestGetTask(t *testing.T) {
 	}
 	if len(logs) == 0 {
 		t.Fatal("expected scan task logs")
+	}
+	if logs[len(logs)-1]["message"] != "task succeeded" {
+		t.Fatalf("expected final success log, got %#v", logs[len(logs)-1])
 	}
 
 	cancelResponse := httptest.NewRecorder()

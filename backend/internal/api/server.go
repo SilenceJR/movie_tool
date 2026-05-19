@@ -551,6 +551,9 @@ func (s *Server) handleCleanupMissing(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	taskRecord := s.tasks.Enqueue(task.TypeCleanupMissing, "cleanup missing files")
+	taskRecord, _ = s.tasks.Start(taskRecord.ID)
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("deleted %d missing files", deleted))
+	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, fmt.Sprintf("cleanup missing files: %d deleted", deleted))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task":          taskRecord,
 		"deleted_count": deleted,
@@ -568,6 +571,10 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 
+	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan library: "+found.Name)
+	taskRecord, _ = s.tasks.Start(taskRecord.ID)
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "walking "+found.Path)
+
 	files, err := scanner.NewScanner().Walk(scanner.ScanRequest{
 		Library: scanner.LibraryInfo{
 			ID:        found.ID,
@@ -577,15 +584,18 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		},
 	})
 	if err != nil {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("discovered %d media files", len(files)))
 
 	imported := make([]media.File, 0, len(files))
 	availablePaths := make([]string, 0, len(files))
 	for _, file := range files {
 		mediaID, versionID, err := s.ensureCatalogVersionForParsedFile(r.Context(), file)
 		if err != nil {
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -606,6 +616,7 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 			ParsedNumber:      file.Number,
 		})
 		if err != nil {
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -615,11 +626,13 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 
 	missingCount, err := s.mediaFiles.MarkMissingByLibrary(r.Context(), found.ID, availablePaths)
 	if err != nil {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan library: "+found.Name)
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("imported %d files, marked %d missing", len(imported), missingCount))
+	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, fmt.Sprintf("scan library: %s (%d files)", found.Name, len(imported)))
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"task":          taskRecord,
 		"files":         files,

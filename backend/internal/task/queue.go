@@ -39,6 +39,45 @@ func (q *Queue) Enqueue(taskType Type, message string) Task {
 	return task
 }
 
+func (q *Queue) Start(id string) (Task, bool) {
+	status := StatusRunning
+	task, ok, _ := q.store.Update(context.Background(), id, UpdateInput{Status: &status})
+	if ok {
+		q.addLog(context.Background(), id, LogLevelInfo, "task started")
+	}
+	return task, ok
+}
+
+func (q *Queue) Succeed(id string, message string) (Task, bool) {
+	status := StatusSucceeded
+	progress := 100
+	input := UpdateInput{Status: &status, Progress: &progress}
+	if message != "" {
+		input.Message = &message
+	}
+	task, ok, _ := q.store.Update(context.Background(), id, input)
+	if ok {
+		q.addLog(context.Background(), id, LogLevelInfo, "task succeeded")
+	}
+	return task, ok
+}
+
+func (q *Queue) Fail(id string, err error) (Task, bool) {
+	status := StatusFailed
+	taskError := ""
+	if err != nil {
+		taskError = err.Error()
+	}
+	if taskError == "" {
+		taskError = "task failed"
+	}
+	task, ok, _ := q.store.Update(context.Background(), id, UpdateInput{Status: &status, Error: &taskError})
+	if ok {
+		q.addLog(context.Background(), id, LogLevelError, taskError)
+	}
+	return task, ok
+}
+
 func (q *Queue) Run(ctx context.Context, id string) Task {
 	task, ok, err := q.store.Get(ctx, id)
 	if err != nil {

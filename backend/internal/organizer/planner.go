@@ -61,16 +61,18 @@ type FileInfo struct {
 }
 
 type PlanRequest struct {
-	MediaID     string        `json:"media_id"`
-	LibraryID   string        `json:"library_id"`
-	MediaType   string        `json:"media_type"`
-	MatchStatus string        `json:"match_status"`
-	FileStatus  string        `json:"file_status"`
-	Media       MediaInfo     `json:"media"`
-	Versions    []VersionInfo `json:"versions"`
-	Files       []FileInfo    `json:"files"`
-	RuleID      string        `json:"rule_id"`
-	Rule        Rule          `json:"rule"`
+	MediaID             string        `json:"media_id"`
+	LibraryID           string        `json:"library_id"`
+	MediaType           string        `json:"media_type"`
+	MatchStatus         string        `json:"match_status"`
+	FileStatus          string        `json:"file_status"`
+	SourcePathPrefix    string        `json:"source_path_prefix"`
+	DownloadDirectoryID string        `json:"download_directory_id"`
+	Media               MediaInfo     `json:"media"`
+	Versions            []VersionInfo `json:"versions"`
+	Files               []FileInfo    `json:"files"`
+	RuleID              string        `json:"rule_id"`
+	Rule                Rule          `json:"rule"`
 }
 
 type Planner struct {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -2210,6 +2211,20 @@ func (s *Server) organizerPlanRequestFromMedia(ctx context.Context, input organi
 
 func (s *Server) organizerPlanRequestFromLibrary(ctx context.Context, input organizer.PlanRequest) (organizer.PlanRequest, error) {
 	mediaType := firstNonEmpty(input.MediaType, input.Rule.MediaType)
+	sourcePathPrefix := strings.TrimSpace(input.SourcePathPrefix)
+	if input.DownloadDirectoryID != "" {
+		directory, ok, err := s.downloads.Get(ctx, input.DownloadDirectoryID)
+		if err != nil {
+			return organizer.PlanRequest{}, err
+		}
+		if !ok {
+			return organizer.PlanRequest{}, fmt.Errorf("download directory not found")
+		}
+		if directory.LibraryID != input.LibraryID {
+			return organizer.PlanRequest{}, fmt.Errorf("download directory does not belong to library")
+		}
+		sourcePathPrefix = firstNonEmpty(sourcePathPrefix, directory.Path)
+	}
 	itemQuery := catalog.ItemQuery{
 		LibraryID:   input.LibraryID,
 		MediaType:   mediaType,
@@ -2269,6 +2284,9 @@ func (s *Server) organizerPlanRequestFromLibrary(ctx context.Context, input orga
 	}
 	input.Files = make([]organizer.FileInfo, 0, len(files))
 	for _, file := range files {
+		if sourcePathPrefix != "" && !pathWithinPrefix(file.Path, sourcePathPrefix) {
+			continue
+		}
 		item, ok := itemByID[file.MediaID]
 		if !ok {
 			continue
@@ -2799,6 +2817,18 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func pathWithinPrefix(path string, prefix string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanPrefix := filepath.Clean(prefix)
+	if cleanPath == cleanPrefix {
+		return true
+	}
+	if cleanPrefix == "." || cleanPrefix == string(filepath.Separator) {
+		return strings.HasPrefix(cleanPath, cleanPrefix)
+	}
+	return strings.HasPrefix(cleanPath, cleanPrefix+string(filepath.Separator))
 }
 
 func parseOptionalTime(value string) (time.Time, error) {

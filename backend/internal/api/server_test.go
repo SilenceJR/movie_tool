@@ -1169,17 +1169,31 @@ func TestScanLibraryMarksMissingFiles(t *testing.T) {
 func TestDownloadDirectoryScanAndOrganizerPlan(t *testing.T) {
 	mediaRoot := t.TempDir()
 	downloadRoot := t.TempDir()
+	otherDownloadRoot := t.TempDir()
 	downloadPath := filepath.Join(downloadRoot, "Inception.2010.1080p.WEB-DL.H264-GROUP.mkv")
 	if err := os.WriteFile(downloadPath, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	otherDownloadPath := filepath.Join(otherDownloadRoot, "Interstellar.2014.1080p.WEB-DL.H264-GROUP.mkv")
+	if err := os.WriteFile(otherDownloadPath, []byte("other"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+mediaRoot+`"}`)
+	libraryID := library["id"].(string)
 	downloadDir := createJSON(t, server, "/api/download-directories", `{
 		"name":"Completed",
 		"path":"`+downloadRoot+`",
-		"library_id":"`+library["id"].(string)+`",
+		"library_id":"`+libraryID+`",
+		"action_mode":"hardlink",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+	otherDownloadDir := createJSON(t, server, "/api/download-directories", `{
+		"name":"Other Completed",
+		"path":"`+otherDownloadRoot+`",
+		"library_id":"`+libraryID+`",
 		"action_mode":"hardlink",
 		"enabled":true,
 		"watch_enabled":true
@@ -1204,16 +1218,45 @@ func TestDownloadDirectoryScanAndOrganizerPlan(t *testing.T) {
 	if mediaID == "" {
 		t.Fatalf("expected download scan to link media, got %#v", file)
 	}
+	otherScanResponse := httptest.NewRecorder()
+	otherScanRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/"+otherDownloadDir["id"].(string)+"/scan", nil)
+	server.ServeHTTP(otherScanResponse, otherScanRequest)
+	if otherScanResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 other download scan, got %d body=%s", otherScanResponse.Code, otherScanResponse.Body.String())
+	}
 
 	rule := createJSON(t, server, "/api/organizer/rules", `{
 		"name":"Movies copy",
-		"library_id":"`+library["id"].(string)+`",
+		"library_id":"`+libraryID+`",
 		"media_type":"movie",
 		"target_root":"`+mediaRoot+`",
 		"action_mode":"copy",
 		"conflict_policy":"skip",
 		"enabled":true
 	}`)
+
+	filteredPlanResponse := httptest.NewRecorder()
+	filteredPlanRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/organizer/plan",
+		bytes.NewBufferString(`{"rule_id":"`+rule["id"].(string)+`","library_id":"`+libraryID+`","download_directory_id":"`+downloadDir["id"].(string)+`"}`),
+	)
+	server.ServeHTTP(filteredPlanResponse, filteredPlanRequest)
+	if filteredPlanResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 filtered organizer plan, got %d body=%s", filteredPlanResponse.Code, filteredPlanResponse.Body.String())
+	}
+	var filteredPlan map[string]any
+	if err := json.NewDecoder(filteredPlanResponse.Body).Decode(&filteredPlan); err != nil {
+		t.Fatal(err)
+	}
+	filteredActions := filteredPlan["actions"].([]any)
+	if len(filteredActions) != 1 {
+		t.Fatalf("expected one filtered action, got %d", len(filteredActions))
+	}
+	filteredSource := filteredActions[0].(map[string]any)["source_path"].(string)
+	if filteredSource != downloadPath {
+		t.Fatalf("expected filtered source %q, got %q", downloadPath, filteredSource)
+	}
 
 	planResponse := httptest.NewRecorder()
 	planRequest := httptest.NewRequest(

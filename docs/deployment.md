@@ -19,7 +19,12 @@ MOVIE_TOOL_PORT=8080
 MOVIE_TOOL_DATA_DIR=/config
 MOVIE_TOOL_CACHE_DIR=/cache
 MOVIE_TOOL_DATABASE=/config/movie-tool.db
+MOVIE_TOOL_DOWNLOAD_WATCH_INTERVAL=5m
+MOVIE_TOOL_DOWNLOAD_WATCH_MIN_STABLE_AGE=2m
 ```
+
+- `MOVIE_TOOL_DOWNLOAD_WATCH_INTERVAL` 控制下载目录后台监听轮询间隔，使用 Go duration 格式，例如 `30s`、`5m`、`1h`。
+- `MOVIE_TOOL_DOWNLOAD_WATCH_MIN_STABLE_AGE` 控制文件最近修改时间稳定阈值，未达到阈值的文件会留到后续轮询再扫描，避免下载中的文件被提前入库。
 
 ## 3. Docker Compose 示例
 

@@ -54,7 +54,7 @@ backend/internal/task         任务系统
 - 已有 `/api/organizer/plan` dry-run 整理计划入口。
 - 已有 `/api/libraries/{id}/scan` 扫描入口，会递归发现媒体文件，创建或复用 media item/version，写入 `media_files`，并标记缺失文件。
 - 已有 `/api/download-directories` CRUD、`/api/download-directories/{id}/scan` 和 `/api/download-directories/watch/run`；下载目录可绑定目标媒体库，扫描完成目录文件并作为待整理来源入库，且可用 `min_stable_seconds` 跳过仍在写入的近期文件；扫描时传入 `organizer_rule_id` 可同步生成限定该下载目录来源的整理 dry-run。
-- 下载目录监听运行入口会只处理同时 `enabled` 和 `watch_enabled` 的目录，并复用单目录扫描、批量入库、失败隔离与可选整理计划生成逻辑；生产入口已启动后台轮询器，默认每 5 分钟触发一次，且跳过 2 分钟内仍在变化的文件。
+- 下载目录监听运行入口会只处理同时 `enabled` 和 `watch_enabled` 的目录，并复用单目录扫描、批量入库、失败隔离与可选整理计划生成逻辑；生产入口已启动后台轮询器，轮询间隔与稳定时间可通过环境变量配置，默认每 5 分钟触发一次，且跳过 2 分钟内仍在变化的文件。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
 - 已有媒体文件解析器。
@@ -105,7 +105,7 @@ backend/internal/task         任务系统
 ## 4. 下一步建议
 
 ```text
-1. 为下载目录监听增加可配置的轮询间隔、稳定时间、默认整理规则和运行状态观测。
+1. 为下载目录监听增加默认整理规则和运行状态观测。
 2. 为下载目录监听增加事件去抖、失败重试和批量合并。
 3. 为扫描任务增加失败文件的持久化追踪与重试入口。
 4. 为 organizer 执行结果增加回滚能力和更细的失败恢复。

@@ -761,6 +761,43 @@ func TestCreateOrganizerPlan(t *testing.T) {
 	}
 }
 
+func TestCreateOrganizerPlanFiltersActionsByStatus(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	targetRoot := filepath.Join(root, "library")
+	existingTarget := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p.mkv")
+	if err := os.MkdirAll(filepath.Dir(existingTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(existingTarget, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Inception","year":2010},
+		"versions":[{"id":"v1","resolution":"1080p"},{"id":"v2","resolution":"2160p"}],
+		"files":[
+			{"id":"f1","media_id":"m1","version_id":"v1","path":"/downloads/Inception.mkv"},
+			{"id":"f2","media_id":"m1","version_id":"v2","path":"/downloads/Inception.2160p.mkv","file_name":"Inception.2160p.mkv"}
+		],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","conflict_policy":"overwrite_with_confirmation","enabled":true},
+		"action_status":"conflict"
+	}`)
+
+	actions := plan["actions"].([]any)
+	if len(actions) != 1 {
+		t.Fatalf("expected one conflict action, got %d", len(actions))
+	}
+	action := actions[0].(map[string]any)
+	if action["status"] != "conflict" || action["target_path"] != existingTarget {
+		t.Fatalf("expected filtered conflict action, got %#v", action)
+	}
+	summary := plan["summary"].(map[string]any)
+	if summary["total_actions"].(float64) != 1 || summary["conflict_count"].(float64) != 1 {
+		t.Fatalf("expected filtered conflict summary, got %#v", summary)
+	}
+}
+
 func TestExecuteOrganizerPlan(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	root := t.TempDir()

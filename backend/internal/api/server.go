@@ -2137,6 +2137,7 @@ func (s *Server) handleCreateOrganizerPlan(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	plan = organizer.FilterPlanActions(plan, organizer.ActionStatus(input.ActionStatus))
 	saved, err := s.organizer.SavePlan(r.Context(), plan)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)

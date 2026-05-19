@@ -172,6 +172,23 @@ func TestPlannerConflictsExistingTargetWhenOverwriteNeedsConfirmation(t *testing
 	}
 }
 
+func TestFilterPlanActionsByStatus(t *testing.T) {
+	plan := FilterPlanActions(Plan{
+		Actions: []Action{
+			{ID: "a1", Status: ActionPending, ActionType: ActionMove},
+			{ID: "a2", Status: ActionConflict, ActionType: ActionCopy},
+			{ID: "a3", Status: ActionConflict, ActionType: ActionHardlink},
+		},
+	}, ActionConflict)
+
+	if len(plan.Actions) != 2 {
+		t.Fatalf("expected two conflict actions, got %+v", plan.Actions)
+	}
+	if plan.Summary.TotalActions != 2 || plan.Summary.ConflictCount != 2 || plan.Summary.MoveCount != 0 || plan.Summary.CopyCount != 1 || plan.Summary.LinkCount != 1 {
+		t.Fatalf("unexpected filtered summary: %+v", plan.Summary)
+	}
+}
+
 func movieConflictRequest(targetRoot string, policy ConflictPolicy) PlanRequest {
 	return PlanRequest{
 		Media: MediaInfo{

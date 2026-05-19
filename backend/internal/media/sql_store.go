@@ -133,6 +133,24 @@ func (s *SQLStore) ListFilesByLibrary(ctx context.Context, libraryID string) ([]
 	return s.ListFiles(ctx, FileQuery{LibraryID: libraryID})
 }
 
+func (s *SQLStore) GetFile(ctx context.Context, id string) (File, bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, media_id, version_id, library_id, path, normalized_path, file_name, extension, size, modified_at,
+       file_status, is_strm, strm_target, detected_media_type, parsed_title, parsed_year,
+       parsed_season, parsed_episode, parsed_number, created_at, updated_at
+FROM media_files
+WHERE id = ?`, id)
+
+	file, err := scanFile(row)
+	if err == sql.ErrNoRows {
+		return File{}, false, nil
+	}
+	if err != nil {
+		return File{}, false, err
+	}
+	return file, true, nil
+}
+
 func (s *SQLStore) ListFiles(ctx context.Context, query FileQuery) ([]File, error) {
 	where := "WHERE 1 = 1"
 	args := make([]any, 0, 2)

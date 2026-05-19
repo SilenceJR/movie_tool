@@ -1138,6 +1138,77 @@ func TestScrapeCandidates(t *testing.T) {
 	}
 }
 
+func TestScrapeCandidateScoresFromScannedFile(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "Inception.2010.mkv")
+	if err := os.WriteFile(filePath, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+
+	scanResponse := httptest.NewRecorder()
+	scanRequest := httptest.NewRequest(http.MethodPost, "/api/libraries/"+library["id"].(string)+"/scan", nil)
+	server.ServeHTTP(scanResponse, scanRequest)
+	if scanResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 scan, got %d body=%s", scanResponse.Code, scanResponse.Body.String())
+	}
+
+	filesResponse := httptest.NewRecorder()
+	filesRequest := httptest.NewRequest(http.MethodGet, "/api/media-files?path="+filePath, nil)
+	server.ServeHTTP(filesResponse, filesRequest)
+	if filesResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 file, got %d body=%s", filesResponse.Code, filesResponse.Body.String())
+	}
+	var file map[string]any
+	if err := json.NewDecoder(filesResponse.Body).Decode(&file); err != nil {
+		t.Fatal(err)
+	}
+
+	candidateResponse := httptest.NewRecorder()
+	candidateRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/scrape-candidates",
+		bytes.NewBufferString(`{
+			"media_file_id":"`+file["id"].(string)+`",
+			"provider":"tmdb",
+			"external_id":"27205",
+			"title":"Inception",
+			"year":2010
+		}`),
+	)
+	server.ServeHTTP(candidateResponse, candidateRequest)
+	if candidateResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 candidate, got %d body=%s", candidateResponse.Code, candidateResponse.Body.String())
+	}
+
+	var candidate map[string]any
+	if err := json.NewDecoder(candidateResponse.Body).Decode(&candidate); err != nil {
+		t.Fatal(err)
+	}
+	if candidate["media_id"] != file["media_id"] {
+		t.Fatalf("expected candidate media_id from scanned file, got %#v", candidate)
+	}
+	if candidate["score"].(float64) != 45 {
+		t.Fatalf("expected score 45, got %#v", candidate["score"])
+	}
+
+	mediaResponse := httptest.NewRecorder()
+	mediaRequest := httptest.NewRequest(http.MethodGet, "/api/media/"+file["media_id"].(string), nil)
+	server.ServeHTTP(mediaResponse, mediaRequest)
+	if mediaResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 media, got %d body=%s", mediaResponse.Code, mediaResponse.Body.String())
+	}
+	var mediaItem map[string]any
+	if err := json.NewDecoder(mediaResponse.Body).Decode(&mediaItem); err != nil {
+		t.Fatal(err)
+	}
+	if mediaItem["match_status"] != "low_confidence" {
+		t.Fatalf("expected low_confidence match status, got %#v", mediaItem["match_status"])
+	}
+}
+
 func TestScrapeDecisions(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

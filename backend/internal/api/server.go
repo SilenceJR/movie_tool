@@ -15,6 +15,7 @@ import (
 	"movie-tool/backend/internal/library"
 	"movie-tool/backend/internal/localization"
 	"movie-tool/backend/internal/media"
+	"movie-tool/backend/internal/metadata"
 	"movie-tool/backend/internal/nfo"
 	"movie-tool/backend/internal/organizer"
 	"movie-tool/backend/internal/scanner"
@@ -1277,12 +1278,76 @@ func (s *Server) handleCreateScrapeCandidate(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := s.scoreScrapeCandidate(r.Context(), &input); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	created, err := s.scraper.CreateCandidate(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := s.refreshMatchStatus(r.Context(), created); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) scoreScrapeCandidate(ctx context.Context, input *scraper.CandidateInput) error {
+	if input.Score > 0 && len(input.ScoreReasons) > 0 {
+		return nil
+	}
+	if input.MediaFileID == "" {
+		return nil
+	}
+	file, ok, err := s.mediaFiles.GetFile(ctx, input.MediaFileID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	if input.MediaID == "" {
+		input.MediaID = file.MediaID
+	}
+	if input.Score > 0 && len(input.ScoreReasons) > 0 {
+		return nil
+	}
+	scored := scraper.ScoreCandidate(scraper.ParsedMedia{
+		Title:  file.ParsedTitle,
+		Year:   file.ParsedYear,
+		Number: file.ParsedNumber,
+	}, *input)
+	input.Score = scored.Score
+	input.ScoreReasons = scored.ScoreReasons
+	return nil
+}
+
+func (s *Server) refreshMatchStatus(ctx context.Context, candidate scraper.StoredCandidate) error {
+	if candidate.MediaID == "" {
+		return nil
+	}
+	item, ok, err := s.catalog.GetItem(ctx, candidate.MediaID)
+	if err != nil || !ok {
+		return err
+	}
+	if item.Locked {
+		return nil
+	}
+	candidates, err := s.scraper.ListCandidates(ctx, scraper.CandidateQuery{MediaID: candidate.MediaID})
+	if err != nil {
+		return err
+	}
+	bestScore := 0
+	for _, candidate := range candidates {
+		if candidate.Score > bestScore {
+			bestScore = candidate.Score
+		}
+	}
+	status := catalog.MatchStatus(metadata.DecideMatch(bestScore, len(candidates)))
+	_, _, err = s.catalog.UpdateItem(ctx, candidate.MediaID, catalog.ItemUpdate{MatchStatus: &status})
+	return err
 }
 
 func (s *Server) handleListScrapeDecisions(w http.ResponseWriter, r *http.Request) {

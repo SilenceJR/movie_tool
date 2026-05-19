@@ -11,6 +11,7 @@ import (
 
 type Store interface {
 	UpsertFile(context.Context, FileInput) (File, error)
+	GetFile(context.Context, string) (File, bool, error)
 	ListFilesByLibrary(context.Context, string) ([]File, error)
 	ListFiles(context.Context, FileQuery) ([]File, error)
 	GetFileByPath(context.Context, string) (File, bool, error)
@@ -128,6 +129,18 @@ func (s *MemoryStore) ListFiles(_ context.Context, query FileQuery) ([]File, err
 		files = append(files, file)
 	}
 	return files, nil
+}
+
+func (s *MemoryStore) GetFile(_ context.Context, id string) (File, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, file := range s.files {
+		if file.ID == id {
+			return file, true, nil
+		}
+	}
+	return File{}, false, nil
 }
 
 func (s *MemoryStore) GetFileByPath(_ context.Context, path string) (File, bool, error) {

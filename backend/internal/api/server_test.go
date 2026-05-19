@@ -1354,6 +1354,25 @@ func TestDownloadDirectoryScanAndOrganizerPlan(t *testing.T) {
 		"enabled":true
 	}`)
 
+	scanWithPlanResponse := httptest.NewRecorder()
+	scanWithPlanRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/"+downloadDir["id"].(string)+"/scan?organizer_rule_id="+rule["id"].(string), nil)
+	server.ServeHTTP(scanWithPlanResponse, scanWithPlanRequest)
+	if scanWithPlanResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 download scan with organizer plan, got %d body=%s", scanWithPlanResponse.Code, scanWithPlanResponse.Body.String())
+	}
+	var scanWithPlanBody map[string]any
+	if err := json.NewDecoder(scanWithPlanResponse.Body).Decode(&scanWithPlanBody); err != nil {
+		t.Fatal(err)
+	}
+	planFromScan := scanWithPlanBody["organizer_plan"].(map[string]any)
+	planFromScanActions := planFromScan["actions"].([]any)
+	if len(planFromScanActions) != 1 {
+		t.Fatalf("expected scan-created organizer plan for one download directory file, got %d", len(planFromScanActions))
+	}
+	if planFromScanActions[0].(map[string]any)["source_path"] != downloadPath {
+		t.Fatalf("expected scan-created plan source %q, got %#v", downloadPath, planFromScanActions[0])
+	}
+
 	filteredPlanResponse := httptest.NewRecorder()
 	filteredPlanRequest := httptest.NewRequest(
 		http.MethodPost,

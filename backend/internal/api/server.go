@@ -824,16 +824,56 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	var organizerPlan *organizer.Plan
+	if ruleID := strings.TrimSpace(r.URL.Query().Get("organizer_rule_id")); ruleID != "" {
+		plan, err := s.createOrganizerPlanForDownloadDirectory(r.Context(), ruleID, directory)
+		if err != nil {
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		organizerPlan = &plan
+		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "created organizer plan "+plan.ID)
+	}
 	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("imported %d download files", len(imported)))
 	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, fmt.Sprintf("scan download directory: %s (%d files)", directory.Name, len(imported)))
-	writeJSON(w, http.StatusAccepted, map[string]any{
+	response := map[string]any{
 		"task":               taskRecord,
 		"download_directory": directory,
 		"target_library":     targetLibrary,
 		"files":              files,
 		"imported":           imported,
 		"count":              len(imported),
+	}
+	if organizerPlan != nil {
+		response["organizer_plan"] = organizerPlan
+	}
+	writeJSON(w, http.StatusAccepted, response)
+}
+
+func (s *Server) createOrganizerPlanForDownloadDirectory(ctx context.Context, ruleID string, directory download.Directory) (organizer.Plan, error) {
+	rule, ok, err := s.organizer.GetRule(ctx, ruleID)
+	if err != nil {
+		return organizer.Plan{}, err
+	}
+	if !ok {
+		return organizer.Plan{}, fmt.Errorf("organizer rule not found")
+	}
+	request, err := s.organizerPlanRequestFromLibrary(ctx, organizer.PlanRequest{
+		RuleID:              ruleID,
+		Rule:                rule,
+		LibraryID:           directory.LibraryID,
+		DownloadDirectoryID: directory.ID,
+		SourcePathPrefix:    directory.Path,
 	})
+	if err != nil {
+		return organizer.Plan{}, err
+	}
+	plan, err := organizer.NewPlanner().Build(request)
+	if err != nil {
+		return organizer.Plan{}, err
+	}
+	return s.organizer.SavePlan(ctx, plan)
 }
 
 func (s *Server) importScannedFiles(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string) ([]media.File, int, error) {

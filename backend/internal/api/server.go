@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"movie-tool/backend/internal/ai"
 	"movie-tool/backend/internal/automation"
@@ -194,6 +195,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/organizer/rules/", s.handleDeleteOrganizerRule)
 	s.mux.HandleFunc("POST /api/organizer/plan", s.handleCreateOrganizerPlan)
 	s.mux.HandleFunc("GET /api/organizer/plans/", s.handleGetOrganizerPlan)
+	s.mux.HandleFunc("POST /api/organizer/plans/", s.handleOrganizerPlanAction)
 	s.mux.HandleFunc("GET /api/organizer/actions", s.handleListOrganizerActions)
 	s.mux.HandleFunc("GET /api/automations", s.handleListAutomations)
 	s.mux.HandleFunc("POST /api/automations", s.handleCreateAutomation)
@@ -2147,6 +2149,84 @@ func (s *Server) handleGetOrganizerPlan(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, plan)
+}
+
+func (s *Server) handleOrganizerPlanAction(w http.ResponseWriter, r *http.Request) {
+	id, action, err := pathIDAction(r.URL.Path, "/api/organizer/plans/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	switch action {
+	case "execute":
+		s.handleExecuteOrganizerPlan(w, r, id)
+	case "cancel":
+		s.handleCancelOrganizerPlan(w, r, id)
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported organizer plan action %q", action))
+	}
+}
+
+func (s *Server) handleExecuteOrganizerPlan(w http.ResponseWriter, r *http.Request, id string) {
+	plan, ok, err := s.organizer.GetPlan(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	if plan.Status == organizer.PlanSucceeded || plan.Status == organizer.PlanCanceled {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan cannot be executed from status %q", plan.Status))
+		return
+	}
+
+	taskRecord := s.tasks.Enqueue(task.TypeOrganizeFiles, "execute organizer plan: "+plan.ID)
+	taskRecord, _ = s.tasks.Start(taskRecord.ID)
+	executed := organizer.NewExecutor().Execute(r.Context(), plan)
+	saved, err := s.organizer.UpdatePlan(r.Context(), executed)
+	if err != nil {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	for _, action := range saved.Actions {
+		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("%s %s -> %s: %s", action.ActionType, action.SourcePath, action.TargetPath, action.Status))
+	}
+	if saved.Status == organizer.PlanFailed {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, fmt.Errorf("organizer plan failed"))
+	} else {
+		taskRecord, _ = s.tasks.Succeed(taskRecord.ID, "execute organizer plan: "+plan.ID)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task": taskRecord,
+		"plan": saved,
+	})
+}
+
+func (s *Server) handleCancelOrganizerPlan(w http.ResponseWriter, r *http.Request, id string) {
+	plan, ok, err := s.organizer.GetPlan(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	if plan.Status == organizer.PlanSucceeded {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("succeeded organizer plan cannot be canceled"))
+		return
+	}
+	plan.Status = organizer.PlanCanceled
+	plan.UpdatedAt = time.Now().UTC()
+	saved, err := s.organizer.UpdatePlan(r.Context(), plan)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
 }
 
 func (s *Server) handleListOrganizerActions(w http.ResponseWriter, r *http.Request) {

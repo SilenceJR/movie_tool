@@ -189,6 +189,56 @@ INSERT INTO organizer_actions (
 	return plan, nil
 }
 
+func (s *SQLStore) UpdatePlan(ctx context.Context, plan Plan) (Plan, error) {
+	if plan.ID == "" {
+		return Plan{}, fmt.Errorf("plan id is required")
+	}
+	summaryJSON, err := json.Marshal(plan.Summary)
+	if err != nil {
+		return Plan{}, err
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE organizer_plans
+SET status = ?, dry_run = ?, summary = ?, updated_at = ?
+WHERE id = ?`,
+		string(plan.Status),
+		boolInt(plan.DryRun),
+		string(summaryJSON),
+		formatTime(plan.UpdatedAt),
+		plan.ID,
+	)
+	if err != nil {
+		return Plan{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Plan{}, err
+	}
+	if affected == 0 {
+		return Plan{}, fmt.Errorf("organizer plan not found")
+	}
+
+	for _, action := range plan.Actions {
+		if _, err := s.db.ExecContext(ctx, `
+UPDATE organizer_actions
+SET target_path = ?, status = ?, conflict_reason = ?, error = ?, executed_at = ?
+WHERE id = ? AND plan_id = ?`,
+			action.TargetPath,
+			string(action.Status),
+			nullableString(action.ConflictReason),
+			nullableString(action.Error),
+			formatNullableTime(action.ExecutedAt),
+			action.ID,
+			plan.ID,
+		); err != nil {
+			return Plan{}, err
+		}
+	}
+
+	return plan, nil
+}
+
 func (s *SQLStore) GetPlan(ctx context.Context, id string) (Plan, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, library_id, status, dry_run, summary, created_at, updated_at

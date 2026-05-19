@@ -756,6 +756,64 @@ func TestCreateOrganizerPlan(t *testing.T) {
 	}
 }
 
+func TestExecuteOrganizerPlan(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	source := filepath.Join(root, "downloads", "Inception.mkv")
+	targetRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Inception","year":2010},
+		"versions":[{"id":"v1","resolution":"1080p","source":"web-dl"}],
+		"files":[{"id":"f1","media_id":"m1","version_id":"v1","path":"`+source+`"}],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","enabled":true}
+	}`)
+	planID := plan["id"].(string)
+
+	executeResponse := httptest.NewRecorder()
+	executeRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/execute", nil)
+	server.ServeHTTP(executeResponse, executeRequest)
+	if executeResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 execute, got %d body=%s", executeResponse.Code, executeResponse.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(executeResponse.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	executed := body["plan"].(map[string]any)
+	if executed["status"] != "succeeded" || executed["dry_run"] != false {
+		t.Fatalf("expected executed plan, got %#v", executed)
+	}
+	actions := executed["actions"].([]any)
+	action := actions[0].(map[string]any)
+	if action["status"] != "succeeded" {
+		t.Fatalf("expected succeeded action, got %#v", action)
+	}
+	target := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p.mkv")
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("expected copied target: %v", err)
+	}
+	if string(content) != "movie" {
+		t.Fatalf("unexpected target content %q", string(content))
+	}
+
+	logsResponse := httptest.NewRecorder()
+	taskBody := body["task"].(map[string]any)
+	logsRequest := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskBody["id"].(string)+"/logs", nil)
+	server.ServeHTTP(logsResponse, logsRequest)
+	if logsResponse.Code != http.StatusOK {
+		t.Fatalf("expected task logs, got %d body=%s", logsResponse.Code, logsResponse.Body.String())
+	}
+}
+
 func TestOrganizerRulesAndPlanByRuleID(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

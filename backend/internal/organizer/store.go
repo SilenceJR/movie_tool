@@ -15,6 +15,7 @@ type Store interface {
 	UpdateRule(context.Context, string, RuleUpdate) (Rule, bool, error)
 	DeleteRule(context.Context, string) (bool, error)
 	SavePlan(context.Context, Plan) (Plan, error)
+	UpdatePlan(context.Context, Plan) (Plan, error)
 	GetPlan(context.Context, string) (Plan, bool, error)
 	ListActions(context.Context, string) ([]Action, error)
 }
@@ -105,6 +106,23 @@ func (s *MemoryStore) SavePlan(_ context.Context, plan Plan) (Plan, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	copied := clonePlan(plan)
+	s.plans[copied.ID] = copied
+	s.actions[copied.ID] = append([]Action(nil), copied.Actions...)
+	return clonePlan(copied), nil
+}
+
+func (s *MemoryStore) UpdatePlan(_ context.Context, plan Plan) (Plan, error) {
+	if plan.ID == "" {
+		return Plan{}, fmt.Errorf("plan id is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.plans[plan.ID]; !ok {
+		return Plan{}, fmt.Errorf("organizer plan not found")
+	}
 	copied := clonePlan(plan)
 	s.plans[copied.ID] = copied
 	s.actions[copied.ID] = append([]Action(nil), copied.Actions...)

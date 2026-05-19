@@ -3,6 +3,7 @@ package organizer
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,7 +66,8 @@ type PlanRequest struct {
 }
 
 type Planner struct {
-	Now func() time.Time
+	Now          func() time.Time
+	TargetExists func(string) bool
 }
 
 func NewPlanner() Planner {
@@ -104,20 +106,24 @@ func (p Planner) Build(request PlanRequest) (Plan, error) {
 		}
 
 		targetPath := filepath.Join(rule.TargetRoot, cleanRelativePath(folder), cleanFileName(name)+fileExtension(file))
-		action := Action{
-			ID:          "action-" + strconv.Itoa(index+1),
-			PlanID:      plan.ID,
-			MediaID:     firstNonEmpty(file.MediaID, request.Media.ID),
-			MediaFileID: file.ID,
-			ActionType:  defaultActionMode(rule.ActionMode),
-			SourcePath:  file.Path,
-			TargetPath:  targetPath,
-			Status:      ActionPending,
-			CreatedAt:   now,
-		}
+		status, conflictReason := ActionPending, ""
 		if previousSource, ok := seenTargets[targetPath]; ok && previousSource != file.Path {
-			action.Status = ActionConflict
-			action.ConflictReason = "duplicate target path in plan"
+			targetPath, status, conflictReason = p.resolveConflict(rule, targetPath, "duplicate target path in plan", seenTargets)
+		}
+		if status == ActionPending && p.targetExists(targetPath) && !samePath(targetPath, file.Path) {
+			targetPath, status, conflictReason = p.resolveConflict(rule, targetPath, "target path already exists", seenTargets)
+		}
+		action := Action{
+			ID:             "action-" + strconv.Itoa(index+1),
+			PlanID:         plan.ID,
+			MediaID:        firstNonEmpty(file.MediaID, request.Media.ID),
+			MediaFileID:    file.ID,
+			ActionType:     defaultActionMode(rule.ActionMode),
+			SourcePath:     file.Path,
+			TargetPath:     targetPath,
+			Status:         status,
+			ConflictReason: conflictReason,
+			CreatedAt:      now,
 		}
 		seenTargets[targetPath] = file.Path
 		plan.Actions = append(plan.Actions, action)
@@ -132,6 +138,40 @@ func (p Planner) now() time.Time {
 		return p.Now()
 	}
 	return time.Now()
+}
+
+func (p Planner) targetExists(path string) bool {
+	if p.TargetExists != nil {
+		return p.TargetExists(path)
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (p Planner) resolveConflict(rule Rule, targetPath string, reason string, seenTargets map[string]string) (string, ActionStatus, string) {
+	switch defaultConflictPolicy(rule.ConflictPolicy) {
+	case ConflictRename:
+		return p.nextAvailableTarget(targetPath, seenTargets), ActionPending, ""
+	case ConflictOverwriteWithConfirmation:
+		return targetPath, ActionConflict, reason
+	default:
+		return targetPath, ActionSkipped, reason
+	}
+}
+
+func (p Planner) nextAvailableTarget(targetPath string, seenTargets map[string]string) string {
+	extension := filepath.Ext(targetPath)
+	base := strings.TrimSuffix(targetPath, extension)
+	for index := 1; ; index++ {
+		candidate := base + " (" + strconv.Itoa(index) + ")" + extension
+		if _, ok := seenTargets[candidate]; ok {
+			continue
+		}
+		if p.targetExists(candidate) {
+			continue
+		}
+		return candidate
+	}
 }
 
 func withDefaultRuleTemplates(rule Rule, mediaType string) Rule {
@@ -282,6 +322,10 @@ func stablePart(value string, fallback string) string {
 		return cleanFileName(value)
 	}
 	return fallback
+}
+
+func samePath(left string, right string) bool {
+	return filepath.Clean(left) == filepath.Clean(right)
 }
 
 func intString(value int) string {

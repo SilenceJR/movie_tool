@@ -77,7 +77,8 @@ backend/internal/task         任务系统
 - 默认支持 movie、tv、av 模板；Rule 未指定模板时按媒体类型补齐默认模板。
 - planner 只生成计划，不执行真实移动、复制或链接操作；同一媒体的多版本文件会落入同一媒体目录。
 - `POST /api/organizer/plan` 可显式传入 media/versions/files，也已支持 `rule_id + media_id` 自动从 catalog/media_files 组装 dry-run，可把下载目录来源文件按规则预览为 hardlink/symlink/move/copy 到目标媒体库目录。
-- 仍需补齐 `rule_id + library_id` 批量组装、磁盘冲突检测和真实执行器。
+- dry-run 会检测计划内重复目标和磁盘上已有目标；`skip` 会标记 skipped，`rename` 会预演重命名目标，`overwrite_with_confirmation` 会标记 conflict 等待确认。
+- 仍需补齐 `rule_id + library_id` 批量组装和真实执行器。
 
 ### scanner
 
@@ -99,7 +100,7 @@ backend/internal/task         任务系统
 1. 将到期 automation tick 接入 API/server 生命周期，并记录 automation_runs。
 2. 为下载目录接入真实 watcher，文件创建/完成后自动触发扫描与匹配流程。
 3. 扩展 organizer dry-run API，支持 rule_id + library_id 批量组装计划。
-4. 为 organizer plan 增加磁盘冲突检测和 conflict_policy dry-run 预演。
-5. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
-6. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
+4. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
+5. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
+6. 为 organizer 增加真实执行器，按 action 状态执行 move/copy/hardlink/symlink 并记录结果。
 ```

@@ -106,17 +106,112 @@ func TestPlannerBuildAVNumberFolder(t *testing.T) {
 	assertSummary(t, plan.Summary, 1, 1, 0)
 }
 
+func TestPlannerSkipsExistingTargetWhenPolicySkip(t *testing.T) {
+	targetRoot := "/library/movies"
+	existing := filepath.Join(targetRoot, "Inception (2010)", "Inception (2010) - 1080p web-dl.mkv")
+	planner := Planner{
+		Now: fixedNow,
+		TargetExists: func(path string) bool {
+			return path == existing
+		},
+	}
+	plan, err := planner.Build(movieConflictRequest(targetRoot, ConflictSkip))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	action := plan.Actions[0]
+	assertTarget(t, action, existing, ActionSkipped)
+	if action.ConflictReason != "target path already exists" {
+		t.Fatalf("ConflictReason = %q", action.ConflictReason)
+	}
+	assertSummary(t, plan.Summary, 1, 0, 0)
+	if plan.Summary.SkipCount != 1 {
+		t.Fatalf("expected one skipped action, got %+v", plan.Summary)
+	}
+}
+
+func TestPlannerRenamesExistingTargetWhenPolicyRename(t *testing.T) {
+	targetRoot := "/library/movies"
+	existing := filepath.Join(targetRoot, "Inception (2010)", "Inception (2010) - 1080p web-dl.mkv")
+	renamed := filepath.Join(targetRoot, "Inception (2010)", "Inception (2010) - 1080p web-dl (1).mkv")
+	planner := Planner{
+		Now: fixedNow,
+		TargetExists: func(path string) bool {
+			return path == existing
+		},
+	}
+	plan, err := planner.Build(movieConflictRequest(targetRoot, ConflictRename))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	assertTarget(t, plan.Actions[0], renamed, ActionPending)
+	if plan.Actions[0].ConflictReason != "" {
+		t.Fatalf("expected rename to clear conflict reason, got %q", plan.Actions[0].ConflictReason)
+	}
+}
+
+func TestPlannerConflictsExistingTargetWhenOverwriteNeedsConfirmation(t *testing.T) {
+	targetRoot := "/library/movies"
+	existing := filepath.Join(targetRoot, "Inception (2010)", "Inception (2010) - 1080p web-dl.mkv")
+	planner := Planner{
+		Now: fixedNow,
+		TargetExists: func(path string) bool {
+			return path == existing
+		},
+	}
+	plan, err := planner.Build(movieConflictRequest(targetRoot, ConflictOverwriteWithConfirmation))
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	assertTarget(t, plan.Actions[0], existing, ActionConflict)
+	if plan.Summary.ConflictCount != 1 {
+		t.Fatalf("expected one conflict, got %+v", plan.Summary)
+	}
+}
+
+func movieConflictRequest(targetRoot string, policy ConflictPolicy) PlanRequest {
+	return PlanRequest{
+		Media: MediaInfo{
+			ID:        "media-1",
+			LibraryID: "library-1",
+			MediaType: MediaTypeMovie,
+			Title:     "Inception",
+			Year:      2010,
+		},
+		Versions: []VersionInfo{
+			{ID: "v-hd", Resolution: "1080p", Source: "web-dl"},
+		},
+		Files: []FileInfo{
+			{ID: "file-1", VersionID: "v-hd", Path: "/downloads/Inception.2010.1080p.mkv"},
+		},
+		Rule: Rule{
+			LibraryID:      "library-1",
+			TargetRoot:     targetRoot,
+			ActionMode:     ActionHardlink,
+			ConflictPolicy: policy,
+			Enabled:        true,
+		},
+	}
+}
+
 func fixedNow() time.Time {
 	return time.Date(2026, 5, 19, 8, 0, 0, 0, time.UTC)
 }
 
-func assertTarget(t *testing.T, action Action, want string) {
+func assertTarget(t *testing.T, action Action, want string, statuses ...ActionStatus) {
 	t.Helper()
 	if action.TargetPath != want {
 		t.Fatalf("TargetPath = %q, want %q", action.TargetPath, want)
 	}
-	if action.Status != ActionPending {
-		t.Fatalf("Status = %q, want %q", action.Status, ActionPending)
+	wantStatus := ActionPending
+	if len(statuses) > 0 {
+		wantStatus = statuses[0]
+	}
+	if action.Status != wantStatus {
+		t.Fatalf("Status = %q, want %q", action.Status, wantStatus)
 	}
 }
 

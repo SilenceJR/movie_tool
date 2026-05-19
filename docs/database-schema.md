@@ -503,7 +503,7 @@ CREATE TABLE automation_runs (
 ```sql
 CREATE INDEX idx_media_items_library ON media_items(library_id);
 CREATE INDEX idx_media_items_type_year ON media_items(media_type, year);
-CREATE INDEX idx_media_files_path ON media_files(normalized_path);
+CREATE UNIQUE INDEX idx_media_files_normalized_path_unique ON media_files(normalized_path);
 CREATE INDEX idx_media_files_status ON media_files(file_status);
 CREATE INDEX idx_organizer_actions_plan ON organizer_actions(plan_id);
 CREATE INDEX idx_media_people_person ON media_people(person_id);

@@ -15,6 +15,7 @@ import (
 
 	"movie-tool/backend/internal/catalog"
 	"movie-tool/backend/internal/config"
+	"movie-tool/backend/internal/scanner"
 	"movie-tool/backend/internal/task"
 )
 
@@ -1230,6 +1231,40 @@ func TestScanLibraryBatchSize(t *testing.T) {
 	}
 	if len(body["imported"].([]any)) != 3 {
 		t.Fatalf("expected three imported files, got %#v", body["imported"])
+	}
+}
+
+func TestImportScannedFilesContinueOnError(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	files := []scanner.ParsedFile{
+		{
+			LibraryID: "library-1",
+			MediaType: "movie",
+			Path:      "/downloads/Inception.2010.mkv",
+			FileName:  "Inception.2010.mkv",
+			Extension: ".mkv",
+			Title:     "Inception",
+			Year:      2010,
+		},
+		{
+			MediaType: "movie",
+			Path:      "/downloads/Broken.2020.mkv",
+			FileName:  "Broken.2020.mkv",
+			Extension: ".mkv",
+			Title:     "Broken",
+			Year:      2020,
+		},
+	}
+
+	imported, missingCount, batches, failures, err := server.importScannedFiles(context.Background(), files, "", 2, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imported) != 1 || missingCount != 0 || batches != 1 {
+		t.Fatalf("unexpected partial import result imported=%d missing=%d batches=%d", len(imported), missingCount, batches)
+	}
+	if len(failures) != 1 || failures[0].Path != "/downloads/Broken.2020.mkv" {
+		t.Fatalf("expected one failed file, got %+v", failures)
 	}
 }
 

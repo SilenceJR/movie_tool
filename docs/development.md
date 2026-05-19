@@ -93,6 +93,7 @@ backend/internal/task         任务系统
 - `media_files.normalized_path` 已通过迁移提升为唯一索引，避免同一路径被重复入库。
 - 生产 SQLite 路径下，扫描导入会在同一事务内完成 media item、version、media_file 与 missing 标记更新；内存 store 保持原有测试路径。
 - 扫描入口支持 `batch_size`，可把超大目录的导入拆成多批事务，并在响应中返回 `batch_count`。
+- 扫描入口支持 `continue_on_error=true`，批次失败时会退回单文件导入并在响应/任务日志中记录失败文件，避免个别坏文件阻断整批入库。
 
 ### scraper
 
@@ -105,7 +106,7 @@ backend/internal/task         任务系统
 ```text
 1. 为下载目录接入真实 watcher，文件创建/完成且通过稳定性检测后自动触发扫描、匹配与可选整理计划生成流程。
 2. 为下载目录监听增加事件去抖、失败重试和批量合并。
-3. 为扫描任务增加单文件失败隔离，避免个别坏文件阻断整批入库。
+3. 为扫描任务增加失败文件的持久化追踪与重试入口。
 4. 为 organizer 执行结果增加回滚能力和更细的失败恢复。
 5. 为批量 organizer plan 增加冲突批量确认覆盖处理。
 ```

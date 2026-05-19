@@ -624,6 +624,14 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		writeError(w, http.StatusBadRequest, fmt.Errorf("batch_size cannot be negative"))
 		return
 	}
+	continueOnError := false
+	if value := r.URL.Query().Get("continue_on_error"); value != "" {
+		continueOnError, err = parseBoolQuery(value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
 
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan library: "+found.Name)
 	taskRecord, _ = s.tasks.Start(taskRecord.ID)
@@ -647,19 +655,23 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("importing files in batches of %d", batchSize))
 	}
 
-	imported, missingCount, batchCount, err := s.importScannedFiles(r.Context(), files, found.ID, batchSize)
+	imported, missingCount, batchCount, failures, err := s.importScannedFiles(r.Context(), files, found.ID, batchSize, continueOnError)
 	if err != nil {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	for _, failure := range failures {
+		s.tasks.Log(taskRecord.ID, task.LogLevelWarn, fmt.Sprintf("failed to import %s: %s", failure.Path, failure.Error))
+	}
 
-	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("imported %d files, marked %d missing", len(imported), missingCount))
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("imported %d files, failed %d, marked %d missing", len(imported), len(failures), missingCount))
 	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, fmt.Sprintf("scan library: %s (%d files)", found.Name, len(imported)))
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"task":          taskRecord,
 		"files":         files,
 		"imported":      imported,
+		"failed":        failures,
 		"count":         len(files),
 		"missing_count": missingCount,
 		"batch_count":   batchCount,
@@ -817,6 +829,14 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, fmt.Errorf("batch_size cannot be negative"))
 		return
 	}
+	continueOnError := false
+	if value := r.URL.Query().Get("continue_on_error"); value != "" {
+		continueOnError, err = parseBoolQuery(value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan download directory: "+directory.Name)
 	taskRecord, _ = s.tasks.Start(taskRecord.ID)
 	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "walking "+directory.Path)
@@ -843,11 +863,14 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	imported, _, batchCount, err := s.importScannedFiles(r.Context(), files, "", batchSize)
+	imported, _, batchCount, failures, err := s.importScannedFiles(r.Context(), files, "", batchSize, continueOnError)
 	if err != nil {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	for _, failure := range failures {
+		s.tasks.Log(taskRecord.ID, task.LogLevelWarn, fmt.Sprintf("failed to import %s: %s", failure.Path, failure.Error))
 	}
 	var organizerPlan *organizer.Plan
 	if ruleID := strings.TrimSpace(r.URL.Query().Get("organizer_rule_id")); ruleID != "" {
@@ -868,6 +891,7 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		"target_library":     targetLibrary,
 		"files":              files,
 		"imported":           imported,
+		"failed":             failures,
 		"count":              len(imported),
 		"batch_count":        batchCount,
 	}
@@ -902,21 +926,43 @@ func (s *Server) createOrganizerPlanForDownloadDirectory(ctx context.Context, ru
 	return s.organizer.SavePlan(ctx, plan)
 }
 
-func (s *Server) importScannedFiles(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string, batchSize int) ([]media.File, int, int, error) {
-	if batchSize <= 0 || batchSize >= len(files) {
+type scanImportFailure struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
+func (s *Server) importScannedFiles(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string, batchSize int, continueOnError bool) ([]media.File, int, int, []scanImportFailure, error) {
+	if continueOnError && batchSize <= 0 {
+		batchSize = 1
+	}
+	if !continueOnError && (batchSize <= 0 || batchSize >= len(files)) {
 		imported, missingCount, err := s.importScannedFilesSingleBatch(ctx, files, markMissingLibraryID)
-		return imported, missingCount, batchCount(len(files), batchSize), err
+		return imported, missingCount, batchCount(len(files), batchSize), nil, err
+	}
+	if batchSize <= 0 || batchSize > len(files) {
+		batchSize = len(files)
 	}
 
 	imported := make([]media.File, 0, len(files))
+	failures := make([]scanImportFailure, 0)
 	for start := 0; start < len(files); start += batchSize {
 		end := start + batchSize
 		if end > len(files) {
 			end = len(files)
 		}
-		batchImported, _, err := s.importScannedFilesSingleBatch(ctx, files[start:end], "")
+		batchFiles := files[start:end]
+		batchImported, _, err := s.importScannedFilesSingleBatch(ctx, batchFiles, "")
 		if err != nil {
-			return nil, 0, 0, err
+			if !continueOnError {
+				return nil, 0, 0, nil, err
+			}
+			fileImported, fileFailures, err := s.importFilesIndividually(ctx, batchFiles)
+			if err != nil {
+				return nil, 0, 0, nil, err
+			}
+			imported = append(imported, fileImported...)
+			failures = append(failures, fileFailures...)
+			continue
 		}
 		imported = append(imported, batchImported...)
 	}
@@ -929,10 +975,24 @@ func (s *Server) importScannedFiles(ctx context.Context, files []scanner.ParsedF
 		var err error
 		missingCount, err = s.markMissingByLibrary(ctx, markMissingLibraryID, availablePaths)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, nil, err
 		}
 	}
-	return imported, missingCount, batchCount(len(files), batchSize), nil
+	return imported, missingCount, batchCount(len(files), batchSize), failures, nil
+}
+
+func (s *Server) importFilesIndividually(ctx context.Context, files []scanner.ParsedFile) ([]media.File, []scanImportFailure, error) {
+	imported := make([]media.File, 0, len(files))
+	failures := make([]scanImportFailure, 0)
+	for _, file := range files {
+		fileImported, _, err := s.importScannedFilesSingleBatch(ctx, []scanner.ParsedFile{file}, "")
+		if err != nil {
+			failures = append(failures, scanImportFailure{Path: file.Path, Error: err.Error()})
+			continue
+		}
+		imported = append(imported, fileImported...)
+	}
+	return imported, failures, nil
 }
 
 func (s *Server) importScannedFilesSingleBatch(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string) ([]media.File, int, error) {

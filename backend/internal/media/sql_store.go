@@ -151,6 +151,41 @@ WHERE id = ?`, id)
 	return file, true, nil
 }
 
+func (s *SQLStore) UpdateFilePath(ctx context.Context, id string, path string) (File, bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return File{}, false, fmt.Errorf("file path is required")
+	}
+	file, ok, err := s.GetFile(ctx, id)
+	if err != nil || !ok {
+		return File{}, ok, err
+	}
+	now := s.now().UTC()
+	file.Path = path
+	file.NormalizedPath = normalizePath(path)
+	file.FileName = filepath.Base(path)
+	file.Extension = strings.ToLower(filepath.Ext(path))
+	file.Status = FileStatusAvailable
+	file.UpdatedAt = now
+
+	_, err = s.db.ExecContext(ctx, `
+UPDATE media_files
+SET path = ?, normalized_path = ?, file_name = ?, extension = ?, file_status = ?, updated_at = ?
+WHERE id = ?`,
+		file.Path,
+		file.NormalizedPath,
+		file.FileName,
+		file.Extension,
+		string(file.Status),
+		formatTime(file.UpdatedAt),
+		file.ID,
+	)
+	if err != nil {
+		return File{}, true, err
+	}
+	return file, true, nil
+}
+
 func (s *SQLStore) ListFiles(ctx context.Context, query FileQuery) ([]File, error) {
 	where := "WHERE 1 = 1"
 	args := make([]any, 0, 2)

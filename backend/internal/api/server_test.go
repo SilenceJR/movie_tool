@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1102,11 +1103,11 @@ func TestDownloadDirectoryScanAndOrganizerPlan(t *testing.T) {
 	}
 
 	rule := createJSON(t, server, "/api/organizer/rules", `{
-		"name":"Movies hardlink",
+		"name":"Movies copy",
 		"library_id":"`+library["id"].(string)+`",
 		"media_type":"movie",
 		"target_root":"`+mediaRoot+`",
-		"action_mode":"hardlink",
+		"action_mode":"copy",
 		"conflict_policy":"skip",
 		"enabled":true
 	}`)
@@ -1130,14 +1131,39 @@ func TestDownloadDirectoryScanAndOrganizerPlan(t *testing.T) {
 		t.Fatalf("expected one organize action, got %d", len(actions))
 	}
 	action := actions[0].(map[string]any)
-	if action["action_type"] != "hardlink" {
-		t.Fatalf("expected hardlink action, got %#v", action["action_type"])
+	if action["action_type"] != "copy" {
+		t.Fatalf("expected copy action, got %#v", action["action_type"])
 	}
 	if action["source_path"] != downloadPath {
 		t.Fatalf("expected source download path, got %#v", action["source_path"])
 	}
 	if !strings.HasPrefix(action["target_path"].(string), mediaRoot) {
 		t.Fatalf("expected target under media root, got %#v", action["target_path"])
+	}
+
+	targetPath := action["target_path"].(string)
+	executeResponse := httptest.NewRecorder()
+	executeRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+plan["id"].(string)+"/execute", nil)
+	server.ServeHTTP(executeResponse, executeRequest)
+	if executeResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 execute, got %d body=%s", executeResponse.Code, executeResponse.Body.String())
+	}
+
+	if content, err := os.ReadFile(targetPath); err != nil || string(content) != "movie" {
+		t.Fatalf("expected organized target content, content=%q err=%v", string(content), err)
+	}
+	fileResponse := httptest.NewRecorder()
+	fileRequest := httptest.NewRequest(http.MethodGet, "/api/media-files?path="+url.QueryEscape(targetPath), nil)
+	server.ServeHTTP(fileResponse, fileRequest)
+	if fileResponse.Code != http.StatusOK {
+		t.Fatalf("expected media file path update, got %d body=%s", fileResponse.Code, fileResponse.Body.String())
+	}
+	var updatedFile map[string]any
+	if err := json.NewDecoder(fileResponse.Body).Decode(&updatedFile); err != nil {
+		t.Fatal(err)
+	}
+	if updatedFile["id"] != file["id"] || updatedFile["path"] != targetPath {
+		t.Fatalf("expected media file to point at target path, got %#v", updatedFile)
 	}
 }
 

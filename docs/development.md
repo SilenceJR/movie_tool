@@ -76,9 +76,10 @@ backend/internal/task         任务系统
 - 已有 dry-run 文件整理计划器：输入媒体基础信息、版本信息、文件列表和 Rule，输出 Plan 与待执行 Actions。
 - 默认支持 movie、tv、av 模板；Rule 未指定模板时按媒体类型补齐默认模板。
 - planner 生成 dry-run 计划；执行入口会执行 pending 动作并记录 action 状态，支持 move/copy/hardlink/symlink，同一媒体的多版本文件会落入同一媒体目录。
+- 执行成功后会把对应 `media_files` 路径回写到目标媒体目录；显式计划里不存在于库内的文件会跳过路径回写但保留执行结果。
 - `POST /api/organizer/plan` 可显式传入 media/versions/files，也已支持 `rule_id + media_id` 自动从 catalog/media_files 组装 dry-run，可把下载目录来源文件按规则预览为 hardlink/symlink/move/copy 到目标媒体库目录。
 - dry-run 会检测计划内重复目标和磁盘上已有目标；`skip` 会标记 skipped，`rename` 会预演重命名目标，`overwrite_with_confirmation` 会标记 conflict 等待确认。
-- 仍需补齐 `rule_id + library_id` 批量组装、执行后的 media_files 路径回写和回滚/重试能力。
+- 仍需补齐 `rule_id + library_id` 批量组装和执行回滚/重试能力。
 
 ### scanner
 
@@ -102,5 +103,5 @@ backend/internal/task         任务系统
 3. 扩展 organizer dry-run API，支持 rule_id + library_id 批量组装计划。
 4. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
 5. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
-6. 为 organizer 执行结果增加 media_files 路径回写、回滚/重试和更细的失败恢复。
+6. 为 organizer 执行结果增加回滚/重试和更细的失败恢复。
 ```

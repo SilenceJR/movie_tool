@@ -301,6 +301,10 @@ func summarize(actions []Action) Summary {
 	return summary
 }
 
+func SummarizeActions(actions []Action) Summary {
+	return summarize(actions)
+}
+
 func defaultActionMode(mode ActionMode) ActionMode {
 	if mode == "" {
 		return ActionMove

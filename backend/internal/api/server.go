@@ -2191,6 +2191,27 @@ func (s *Server) handleExecuteOrganizerPlan(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	for index, action := range saved.Actions {
+		if action.Status == organizer.ActionSucceeded && action.MediaFileID != "" {
+			if _, ok, err := s.mediaFiles.UpdateFilePath(r.Context(), action.MediaFileID, action.TargetPath); err != nil {
+				saved.Actions[index].Status = organizer.ActionFailed
+				saved.Actions[index].Error = "update media file path: " + err.Error()
+				saved.Status = organizer.PlanFailed
+			} else if !ok {
+				s.tasks.Log(taskRecord.ID, task.LogLevelWarn, "media file not found for path update: "+action.MediaFileID)
+			}
+		}
+	}
+	if saved.Status == organizer.PlanFailed {
+		saved.Summary = organizer.SummarizeActions(saved.Actions)
+		var updateErr error
+		saved, updateErr = s.organizer.UpdatePlan(r.Context(), saved)
+		if updateErr != nil {
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, updateErr)
+			writeError(w, http.StatusInternalServerError, updateErr)
+			return
+		}
+	}
 	for _, action := range saved.Actions {
 		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("%s %s -> %s: %s", action.ActionType, action.SourcePath, action.TargetPath, action.Status))
 	}

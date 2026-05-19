@@ -12,6 +12,7 @@ import (
 type Store interface {
 	UpsertFile(context.Context, FileInput) (File, error)
 	GetFile(context.Context, string) (File, bool, error)
+	UpdateFilePath(context.Context, string, string) (File, bool, error)
 	ListFilesByLibrary(context.Context, string) ([]File, error)
 	ListFiles(context.Context, FileQuery) ([]File, error)
 	GetFileByPath(context.Context, string) (File, bool, error)
@@ -143,6 +144,33 @@ func (s *MemoryStore) GetFile(_ context.Context, id string) (File, bool, error) 
 		if file.ID == id {
 			return file, true, nil
 		}
+	}
+	return File{}, false, nil
+}
+
+func (s *MemoryStore) UpdateFilePath(_ context.Context, id string, path string) (File, bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return File{}, false, fmt.Errorf("file path is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now().UTC()
+	for key, file := range s.files {
+		if file.ID != id {
+			continue
+		}
+		delete(s.files, key)
+		file.Path = path
+		file.NormalizedPath = normalizePath(path)
+		file.FileName = filepath.Base(path)
+		file.Extension = strings.ToLower(filepath.Ext(path))
+		file.Status = FileStatusAvailable
+		file.UpdatedAt = now
+		s.files[file.NormalizedPath] = file
+		return file, true, nil
 	}
 	return File{}, false, nil
 }

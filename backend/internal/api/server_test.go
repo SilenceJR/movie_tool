@@ -875,6 +875,70 @@ func TestOrganizerRulesAndPlanByRuleID(t *testing.T) {
 	}
 }
 
+func TestCreateOrganizerPlanByLibraryID(t *testing.T) {
+	root := t.TempDir()
+	firstPath := filepath.Join(root, "downloads", "Inception.2010.1080p.mkv")
+	secondPath := filepath.Join(root, "downloads", "Interstellar.2014.2160p.mkv")
+	if err := os.MkdirAll(filepath.Dir(firstPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(firstPath, []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+filepath.Dir(firstPath)+`"}`)
+	libraryID := library["id"].(string)
+	scanResponse := httptest.NewRecorder()
+	scanRequest := httptest.NewRequest(http.MethodPost, "/api/libraries/"+libraryID+"/scan", nil)
+	server.ServeHTTP(scanResponse, scanRequest)
+	if scanResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 scan, got %d body=%s", scanResponse.Code, scanResponse.Body.String())
+	}
+
+	rule := createJSON(t, server, "/api/organizer/rules", `{
+		"name":"Movies",
+		"library_id":"`+libraryID+`",
+		"media_type":"movie",
+		"target_root":"`+filepath.Join(root, "library")+`",
+		"folder_template":"{{title}} ({{year}})",
+		"file_template":"{{title}} - {{resolution}}",
+		"action_mode":"copy",
+		"enabled":true
+	}`)
+
+	planResponse := httptest.NewRecorder()
+	planRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/organizer/plan",
+		bytes.NewBufferString(`{"rule_id":"`+rule["id"].(string)+`","library_id":"`+libraryID+`"}`),
+	)
+	server.ServeHTTP(planResponse, planRequest)
+	if planResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 library organizer plan, got %d body=%s", planResponse.Code, planResponse.Body.String())
+	}
+
+	var plan map[string]any
+	if err := json.NewDecoder(planResponse.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	actions := plan["actions"].([]any)
+	if len(actions) != 2 {
+		t.Fatalf("expected two library actions, got %d", len(actions))
+	}
+	targets := []string{
+		actions[0].(map[string]any)["target_path"].(string),
+		actions[1].(map[string]any)["target_path"].(string),
+	}
+	joined := strings.Join(targets, "\n")
+	if !strings.Contains(joined, "Inception (2010)") || !strings.Contains(joined, "Interstellar (2014)") {
+		t.Fatalf("expected per-media target folders, got:\n%s", joined)
+	}
+}
+
 func TestScanLibrary(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "Inception.2010.2160p.BluRay.REMUX.HEVC.HDR10-GROUP.mkv")

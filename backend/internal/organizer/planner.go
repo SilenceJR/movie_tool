@@ -44,15 +44,20 @@ type VersionInfo struct {
 }
 
 type FileInfo struct {
-	ID        string `json:"id"`
-	MediaID   string `json:"media_id"`
-	VersionID string `json:"version_id"`
-	Path      string `json:"path"`
-	FileName  string `json:"file_name"`
-	Extension string `json:"extension"`
-	Season    int    `json:"season"`
-	Episode   int    `json:"episode"`
-	Number    string `json:"number"`
+	ID            string `json:"id"`
+	MediaID       string `json:"media_id"`
+	VersionID     string `json:"version_id"`
+	Path          string `json:"path"`
+	FileName      string `json:"file_name"`
+	Extension     string `json:"extension"`
+	Season        int    `json:"season"`
+	Episode       int    `json:"episode"`
+	Number        string `json:"number"`
+	MediaTitle    string `json:"media_title"`
+	DisplayTitle  string `json:"display_title"`
+	OriginalTitle string `json:"original_title"`
+	Year          int    `json:"year"`
+	MediaType     string `json:"media_type"`
 }
 
 type PlanRequest struct {
@@ -95,7 +100,8 @@ func (p Planner) Build(request PlanRequest) (Plan, error) {
 
 	for index, file := range request.Files {
 		version := versions[file.VersionID]
-		values := templateValues(request.Media, version, file)
+		media := mediaForFile(request.Media, file)
+		values := templateValues(media, version, file)
 		folder, err := renderTemplate(rule.FolderTemplate, values)
 		if err != nil {
 			return Plan{}, err
@@ -116,7 +122,7 @@ func (p Planner) Build(request PlanRequest) (Plan, error) {
 		action := Action{
 			ID:             "action-" + strconv.Itoa(index+1),
 			PlanID:         plan.ID,
-			MediaID:        firstNonEmpty(file.MediaID, request.Media.ID),
+			MediaID:        firstNonEmpty(file.MediaID, media.ID),
 			MediaFileID:    file.ID,
 			ActionType:     defaultActionMode(rule.ActionMode),
 			SourcePath:     file.Path,
@@ -211,6 +217,31 @@ func indexVersions(versions []VersionInfo) map[string]VersionInfo {
 		result[version.ID] = version
 	}
 	return result
+}
+
+func mediaForFile(media MediaInfo, file FileInfo) MediaInfo {
+	if file.MediaID != "" {
+		media.ID = file.MediaID
+	}
+	if file.MediaTitle != "" {
+		media.Title = file.MediaTitle
+	}
+	if file.DisplayTitle != "" {
+		media.DisplayTitle = file.DisplayTitle
+	}
+	if file.OriginalTitle != "" {
+		media.OriginalTitle = file.OriginalTitle
+	}
+	if file.Year > 0 {
+		media.Year = file.Year
+	}
+	if file.MediaType != "" {
+		media.MediaType = file.MediaType
+	}
+	if file.Number != "" {
+		media.Number = file.Number
+	}
+	return media
 }
 
 func templateValues(media MediaInfo, version VersionInfo, file FileInfo) map[string]string {

@@ -2075,6 +2075,14 @@ func (s *Server) handleCreateOrganizerPlan(w http.ResponseWriter, r *http.Reques
 		}
 		input = built
 	}
+	if input.LibraryID != "" && input.MediaID == "" && input.Media.ID == "" && len(input.Files) == 0 {
+		built, err := s.organizerPlanRequestFromLibrary(r.Context(), input)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		input = built
+	}
 	plan, err := organizer.NewPlanner().Build(input)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -2148,6 +2156,78 @@ func (s *Server) organizerPlanRequestFromMedia(ctx context.Context, input organi
 	}
 	if input.LibraryID == "" {
 		input.LibraryID = item.LibraryID
+	}
+	return input, nil
+}
+
+func (s *Server) organizerPlanRequestFromLibrary(ctx context.Context, input organizer.PlanRequest) (organizer.PlanRequest, error) {
+	items, err := s.catalog.ListItems(ctx, catalog.ItemQuery{LibraryID: input.LibraryID})
+	if err != nil {
+		return organizer.PlanRequest{}, err
+	}
+	files, err := s.mediaFiles.ListFiles(ctx, media.FileQuery{LibraryID: input.LibraryID, Status: media.FileStatusAvailable})
+	if err != nil {
+		return organizer.PlanRequest{}, err
+	}
+	if len(files) == 0 {
+		return organizer.PlanRequest{}, fmt.Errorf("library has no available files")
+	}
+
+	itemByID := make(map[string]catalog.Item, len(items))
+	for _, item := range items {
+		itemByID[item.ID] = item
+	}
+	versionByID := make(map[string]catalog.Version)
+	for _, item := range items {
+		versions, err := s.catalog.ListVersions(ctx, item.ID)
+		if err != nil {
+			return organizer.PlanRequest{}, err
+		}
+		for _, version := range versions {
+			versionByID[version.ID] = version
+		}
+	}
+
+	input.Media = organizer.MediaInfo{
+		ID:        "library-" + input.LibraryID,
+		LibraryID: input.LibraryID,
+		MediaType: input.Rule.MediaType,
+		Title:     "Library " + input.LibraryID,
+	}
+	input.Versions = make([]organizer.VersionInfo, 0, len(versionByID))
+	for _, version := range versionByID {
+		input.Versions = append(input.Versions, organizer.VersionInfo{
+			ID:           version.ID,
+			Name:         version.Name,
+			Resolution:   version.Resolution,
+			Source:       version.Source,
+			VideoCodec:   version.VideoCodec,
+			AudioCodec:   version.AudioCodec,
+			HDRFormat:    version.HDRFormat,
+			Edition:      version.Edition,
+			ReleaseGroup: version.ReleaseGroup,
+			IsDefault:    version.IsDefault,
+		})
+	}
+	input.Files = make([]organizer.FileInfo, 0, len(files))
+	for _, file := range files {
+		item := itemByID[file.MediaID]
+		input.Files = append(input.Files, organizer.FileInfo{
+			ID:            file.ID,
+			MediaID:       file.MediaID,
+			VersionID:     file.VersionID,
+			Path:          file.Path,
+			FileName:      file.FileName,
+			Extension:     file.Extension,
+			Season:        file.ParsedSeason,
+			Episode:       file.ParsedEpisode,
+			Number:        file.ParsedNumber,
+			MediaTitle:    item.Title,
+			DisplayTitle:  item.DisplayTitle,
+			OriginalTitle: item.OriginalTitle,
+			Year:          item.Year,
+			MediaType:     item.MediaType,
+		})
 	}
 	return input, nil
 }

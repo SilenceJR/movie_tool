@@ -53,7 +53,7 @@ backend/internal/task         任务系统
 - 已有 `/api/tasks` 列表、日志、取消、retry 入口；扫描/清理这类同步执行的 API 会记录 running/succeeded/failed 状态和任务日志。
 - 已有 `/api/organizer/plan` dry-run 整理计划入口。
 - 已有 `/api/libraries/{id}/scan` 扫描入口，会递归发现媒体文件，创建或复用 media item/version，写入 `media_files`，并标记缺失文件。
-- 已有 `/api/download-directories` CRUD 和 `/api/download-directories/{id}/scan`；下载目录可绑定目标媒体库，扫描完成目录文件并作为待整理来源入库。
+- 已有 `/api/download-directories` CRUD 和 `/api/download-directories/{id}/scan`；下载目录可绑定目标媒体库，扫描完成目录文件并作为待整理来源入库，且可用 `min_stable_seconds` 跳过仍在写入的近期文件。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
 - 已有媒体文件解析器。
@@ -87,7 +87,7 @@ backend/internal/task         任务系统
 - 支持常见视频扩展名，例如 `.mkv`、`.mp4`、`.avi`、`.m2ts`、`.ts`。
 - 忽略隐藏文件、隐藏目录和非媒体 sidecar 文件。
 - 扫描输出会带上 library 元信息，并复用 `ParseFile` 的标题、年份、季集、番号、版本解析能力。
-- 扫描 API 会把解析结果落入 catalog 与 media_files；隐藏文件/目录与字幕、NFO、图片等 sidecar 文件不会进入媒体列表。
+- 扫描 API 会把解析结果落入 catalog 与 media_files；隐藏文件/目录与字幕、NFO、图片等 sidecar 文件不会进入媒体列表；下载目录扫描可复用文件修改时间稳定性过滤，为 watcher 接入预留安全边界。
 
 ### scraper
 
@@ -98,8 +98,8 @@ backend/internal/task         任务系统
 ## 4. 下一步建议
 
 ```text
-1. 为下载目录接入真实 watcher，文件创建/完成后自动触发扫描与匹配流程。
-2. 为下载目录监听补充文件稳定性检测，避免写入未完成的大文件被提前整理。
+1. 为下载目录接入真实 watcher，文件创建/完成且通过稳定性检测后自动触发扫描与匹配流程。
+2. 为下载目录监听增加事件去抖、失败重试和批量合并。
 3. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
 4. 为 organizer 执行结果增加回滚/重试和更细的失败恢复。
 5. 为批量 organizer plan 增加按 match_status、file_status、media_type 的过滤条件。

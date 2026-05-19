@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestWalkFindsMovieFiles(t *testing.T) {
@@ -103,7 +104,33 @@ func TestWalkUsesLibraryPathWhenRootIsEmpty(t *testing.T) {
 	}
 }
 
-func touch(t *testing.T, root string, parts ...string) {
+func TestWalkSkipsRecentlyModifiedFilesWhenStableAgeIsSet(t *testing.T) {
+	root := t.TempDir()
+	oldPath := touch(t, root, "Stable.2020.mkv")
+	recentPath := touch(t, root, "Writing.2024.mkv")
+	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(oldPath, now.Add(-10*time.Minute), now.Add(-10*time.Minute)); err != nil {
+		t.Fatalf("set old mtime: %v", err)
+	}
+	if err := os.Chtimes(recentPath, now.Add(-30*time.Second), now.Add(-30*time.Second)); err != nil {
+		t.Fatalf("set recent mtime: %v", err)
+	}
+
+	files, err := NewScanner().Walk(ScanRequest{
+		Root:           root,
+		Library:        LibraryInfo{ID: "library-stable", MediaType: "movie"},
+		MinModifiedAge: 2 * time.Minute,
+		Now:            func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("walk failed: %v", err)
+	}
+	if len(files) != 1 || files[0].FileName != "Stable.2020.mkv" {
+		t.Fatalf("expected only stable file, got %+v", files)
+	}
+}
+
+func touch(t *testing.T, root string, parts ...string) string {
 	t.Helper()
 
 	path := filepath.Join(append([]string{root}, parts...)...)
@@ -113,4 +140,5 @@ func touch(t *testing.T, root string, parts ...string) {
 	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
 		t.Fatalf("create file: %v", err)
 	}
+	return path
 }

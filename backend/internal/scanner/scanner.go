@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var mediaExtensions = map[string]struct{}{
@@ -33,8 +34,10 @@ type LibraryInfo struct {
 }
 
 type ScanRequest struct {
-	Root    string
-	Library LibraryInfo
+	Root           string
+	Library        LibraryInfo
+	MinModifiedAge time.Duration
+	Now            func() time.Time
 }
 
 type Scanner struct{}
@@ -58,6 +61,14 @@ func (s Scanner) Walk(request ScanRequest) ([]ParsedFile, error) {
 	if root == "" {
 		return nil, fmt.Errorf("scan root is required")
 	}
+	now := time.Now
+	if request.Now != nil {
+		now = request.Now
+	}
+	stableSince := time.Time{}
+	if request.MinModifiedAge > 0 {
+		stableSince = now().Add(-request.MinModifiedAge)
+	}
 
 	var files []ParsedFile
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -76,6 +87,9 @@ func (s Scanner) Walk(request ScanRequest) ([]ParsedFile, error) {
 		info, err := entry.Info()
 		if err != nil {
 			return err
+		}
+		if !stableSince.IsZero() && info.ModTime().After(stableSince) {
+			return nil
 		}
 
 		parsed := ParseFile(path)

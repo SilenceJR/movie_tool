@@ -814,12 +814,21 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 	}
 
 	mediaType := firstNonEmpty(directory.MediaType, string(targetLibrary.MediaType))
+	minStableAge, err := parseOptionalDurationSeconds(r.URL.Query().Get("min_stable_seconds"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan download directory: "+directory.Name)
 	taskRecord, _ = s.tasks.Start(taskRecord.ID)
 	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "walking "+directory.Path)
+	if minStableAge > 0 {
+		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("skipping files modified within %s", minStableAge))
+	}
 
 	files, err := scanner.NewScanner().Walk(scanner.ScanRequest{
-		Root: directory.Path,
+		Root:           directory.Path,
+		MinModifiedAge: minStableAge,
 		Library: scanner.LibraryInfo{
 			ID:        targetLibrary.ID,
 			Name:      targetLibrary.Name,
@@ -2694,6 +2703,17 @@ func parseOptionalInt(value string) (int, error) {
 		return 0, fmt.Errorf("invalid integer query value %q", value)
 	}
 	return parsed, nil
+}
+
+func parseOptionalDurationSeconds(value string) (time.Duration, error) {
+	seconds, err := parseOptionalInt(value)
+	if err != nil {
+		return 0, err
+	}
+	if seconds < 0 {
+		return 0, fmt.Errorf("duration seconds cannot be negative")
+	}
+	return time.Duration(seconds) * time.Second, nil
 }
 
 func firstNonEmpty(values ...string) string {

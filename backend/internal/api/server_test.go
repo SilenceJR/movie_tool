@@ -1538,11 +1538,21 @@ func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T)
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+mediaRoot+`"}`)
 	libraryID := library["id"].(string)
+	rule := createJSON(t, server, "/api/organizer/rules", `{
+		"name":"Watch copy",
+		"library_id":"`+libraryID+`",
+		"media_type":"movie",
+		"target_root":"`+mediaRoot+`",
+		"action_mode":"copy",
+		"conflict_policy":"skip",
+		"enabled":true
+	}`)
 	watchedDir := createJSON(t, server, "/api/download-directories", `{
 		"name":"Watched",
 		"path":"`+watchedRoot+`",
 		"library_id":"`+libraryID+`",
 		"action_mode":"hardlink",
+		"organizer_rule_id":"`+rule["id"].(string)+`",
 		"enabled":true,
 		"watch_enabled":true
 	}`)
@@ -1592,6 +1602,11 @@ func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T)
 	}
 	if imported[0].(map[string]any)["path"] != watchedPath {
 		t.Fatalf("expected imported watched path %q, got %#v", watchedPath, imported[0])
+	}
+	plan := results[0].(map[string]any)["organizer_plan"].(map[string]any)
+	actions := plan["actions"].([]any)
+	if len(actions) != 1 || actions[0].(map[string]any)["source_path"] != watchedPath {
+		t.Fatalf("expected default organizer rule to create plan for watched file, got %#v", plan)
 	}
 }
 

@@ -726,6 +726,10 @@ func (s *Server) handleCreateDownloadDirectory(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, fmt.Errorf("target library not found"))
 		return
 	}
+	if err := s.validateDownloadDirectoryOrganizerRule(r.Context(), input.OrganizerRuleID, input.LibraryID); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	directory, err := s.downloads.Create(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -763,7 +767,18 @@ func (s *Server) handleUpdateDownloadDirectory(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	current, ok, err := s.downloads.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("download directory not found"))
+		return
+	}
+	libraryID := current.LibraryID
 	if input.LibraryID != nil {
+		libraryID = strings.TrimSpace(*input.LibraryID)
 		if _, ok, err := s.libraries.Get(r.Context(), *input.LibraryID); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -771,6 +786,14 @@ func (s *Server) handleUpdateDownloadDirectory(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadRequest, fmt.Errorf("target library not found"))
 			return
 		}
+	}
+	organizerRuleID := current.OrganizerRuleID
+	if input.OrganizerRuleID != nil {
+		organizerRuleID = strings.TrimSpace(*input.OrganizerRuleID)
+	}
+	if err := s.validateDownloadDirectoryOrganizerRule(r.Context(), organizerRuleID, libraryID); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	directory, ok, err := s.downloads.Update(r.Context(), id, input)
 	if err != nil {
@@ -782,6 +805,24 @@ func (s *Server) handleUpdateDownloadDirectory(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, directory)
+}
+
+func (s *Server) validateDownloadDirectoryOrganizerRule(ctx context.Context, ruleID string, libraryID string) error {
+	ruleID = strings.TrimSpace(ruleID)
+	if ruleID == "" {
+		return nil
+	}
+	rule, ok, err := s.organizer.GetRule(ctx, ruleID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("organizer rule not found")
+	}
+	if rule.LibraryID != "" && rule.LibraryID != strings.TrimSpace(libraryID) {
+		return fmt.Errorf("organizer rule does not belong to target library")
+	}
+	return nil
 }
 
 func (s *Server) handleDeleteDownloadDirectory(w http.ResponseWriter, r *http.Request) {
@@ -1007,8 +1048,9 @@ func (s *Server) scanDownloadDirectory(ctx context.Context, directory download.D
 		s.tasks.Log(taskRecord.ID, task.LogLevelWarn, fmt.Sprintf("failed to import %s: %s", failure.Path, failure.Error))
 	}
 	var organizerPlan *organizer.Plan
-	if options.OrganizerRuleID != "" {
-		plan, err := s.createOrganizerPlanForDownloadDirectory(ctx, options.OrganizerRuleID, directory)
+	organizerRuleID := firstNonEmpty(options.OrganizerRuleID, directory.OrganizerRuleID)
+	if organizerRuleID != "" {
+		plan, err := s.createOrganizerPlanForDownloadDirectory(ctx, organizerRuleID, directory)
 		if err != nil {
 			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 			return downloadDirectoryScanResult{}, http.StatusBadRequest, err

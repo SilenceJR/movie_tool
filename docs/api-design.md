@@ -43,6 +43,7 @@ GET /api/download-directories/{id}
 PATCH /api/download-directories/{id}
 DELETE /api/download-directories/{id}
 POST /api/download-directories/{id}/scan
+POST /api/download-directories/watch/run
 ```
 
 创建下载目录示例：
@@ -54,6 +55,7 @@ POST /api/download-directories/{id}/scan
   "library_id": "library_movies",
   "media_type": "movie",
   "action_mode": "hardlink",
+  "organizer_rule_id": "organizer_rule_movies",
   "enabled": true,
   "watch_enabled": true
 }

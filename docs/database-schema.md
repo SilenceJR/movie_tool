@@ -153,11 +153,13 @@ CREATE TABLE download_directories (
   library_id TEXT NOT NULL,
   media_type TEXT,
   action_mode TEXT NOT NULL DEFAULT 'hardlink',
+  organizer_rule_id TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   watch_enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  FOREIGN KEY (library_id) REFERENCES libraries(id)
+  FOREIGN KEY (library_id) REFERENCES libraries(id),
+  FOREIGN KEY (organizer_rule_id) REFERENCES organizer_rules(id)
 );
 ```
 
@@ -166,6 +168,7 @@ CREATE TABLE download_directories (
 - `path` 是下载完成目录或中转目录，不等同于媒体库目标目录。
 - `library_id` 指向整理后的目标媒体库，用于确定分类和默认媒体类型。
 - `action_mode` 表示匹配后默认整理动作，可为 `move`、`copy`、`hardlink`、`symlink`。
+- `organizer_rule_id` 可选，表示下载目录监听或扫描时默认生成整理 dry-run 所使用的规则；请求显式传入 `organizer_rule_id` 时优先使用请求参数。
 - `watch_enabled` 表示该目录后续可被 watcher 监听；当前实现先支持配置与扫描入口。
 
 ### organizer_rules

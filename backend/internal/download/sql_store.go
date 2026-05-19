@@ -31,10 +31,10 @@ func (s *SQLStore) Create(ctx context.Context, input DirectoryInput) (Directory,
 	}
 	directory.ID = newID("download_dir")
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO download_directories (id, name, path, library_id, media_type, action_mode, enabled, watch_enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO download_directories (id, name, path, library_id, media_type, action_mode, organizer_rule_id, enabled, watch_enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		directory.ID, directory.Name, directory.Path, directory.LibraryID, nullString(directory.MediaType), directory.ActionMode,
-		boolInt(directory.Enabled), boolInt(directory.WatchEnabled), formatTime(directory.CreatedAt), formatTime(directory.UpdatedAt))
+		nullString(directory.OrganizerRuleID), boolInt(directory.Enabled), boolInt(directory.WatchEnabled), formatTime(directory.CreatedAt), formatTime(directory.UpdatedAt))
 	if err != nil {
 		return Directory{}, err
 	}
@@ -43,7 +43,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
 func (s *SQLStore) Get(ctx context.Context, id string) (Directory, bool, error) {
 	directory, err := scanDirectory(s.db.QueryRowContext(ctx, `
-SELECT id, name, path, library_id, media_type, action_mode, enabled, watch_enabled, created_at, updated_at
+SELECT id, name, path, library_id, media_type, action_mode, organizer_rule_id, enabled, watch_enabled, created_at, updated_at
 FROM download_directories
 WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
@@ -57,7 +57,7 @@ WHERE id = ?`, id))
 
 func (s *SQLStore) List(ctx context.Context) ([]Directory, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, path, library_id, media_type, action_mode, enabled, watch_enabled, created_at, updated_at
+SELECT id, name, path, library_id, media_type, action_mode, organizer_rule_id, enabled, watch_enabled, created_at, updated_at
 FROM download_directories
 ORDER BY created_at ASC, id ASC`)
 	if err != nil {
@@ -77,7 +77,7 @@ ORDER BY created_at ASC, id ASC`)
 
 func (s *SQLStore) ListWatchEnabled(ctx context.Context) ([]Directory, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, name, path, library_id, media_type, action_mode, enabled, watch_enabled, created_at, updated_at
+SELECT id, name, path, library_id, media_type, action_mode, organizer_rule_id, enabled, watch_enabled, created_at, updated_at
 FROM download_directories
 WHERE enabled = 1 AND watch_enabled = 1
 ORDER BY created_at ASC, id ASC`)
@@ -108,10 +108,10 @@ func (s *SQLStore) Update(ctx context.Context, id string, input DirectoryUpdate)
 	directory.UpdatedAt = s.now().UTC()
 	_, err = s.db.ExecContext(ctx, `
 UPDATE download_directories
-SET name = ?, path = ?, library_id = ?, media_type = ?, action_mode = ?, enabled = ?, watch_enabled = ?, updated_at = ?
+SET name = ?, path = ?, library_id = ?, media_type = ?, action_mode = ?, organizer_rule_id = ?, enabled = ?, watch_enabled = ?, updated_at = ?
 WHERE id = ?`,
 		directory.Name, directory.Path, directory.LibraryID, nullString(directory.MediaType), directory.ActionMode,
-		boolInt(directory.Enabled), boolInt(directory.WatchEnabled), formatTime(directory.UpdatedAt), directory.ID)
+		nullString(directory.OrganizerRuleID), boolInt(directory.Enabled), boolInt(directory.WatchEnabled), formatTime(directory.UpdatedAt), directory.ID)
 	if err != nil {
 		return Directory{}, true, err
 	}
@@ -137,14 +137,16 @@ type directoryScanner interface {
 func scanDirectory(scanner directoryScanner) (Directory, error) {
 	var directory Directory
 	var mediaType sql.NullString
+	var organizerRuleID sql.NullString
 	var enabled int
 	var watchEnabled int
 	var createdAt string
 	var updatedAt string
-	if err := scanner.Scan(&directory.ID, &directory.Name, &directory.Path, &directory.LibraryID, &mediaType, &directory.ActionMode, &enabled, &watchEnabled, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&directory.ID, &directory.Name, &directory.Path, &directory.LibraryID, &mediaType, &directory.ActionMode, &organizerRuleID, &enabled, &watchEnabled, &createdAt, &updatedAt); err != nil {
 		return Directory{}, err
 	}
 	directory.MediaType = mediaType.String
+	directory.OrganizerRuleID = organizerRuleID.String
 	directory.Enabled = enabled == 1
 	directory.WatchEnabled = watchEnabled == 1
 	directory.CreatedAt = parseTime(createdAt)

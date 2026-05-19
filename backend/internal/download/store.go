@@ -102,15 +102,16 @@ func (s *MemoryStore) Delete(_ context.Context, id string) (bool, error) {
 
 func directoryFromInput(input DirectoryInput, now time.Time) (Directory, error) {
 	directory := Directory{
-		Name:         strings.TrimSpace(input.Name),
-		Path:         strings.TrimSpace(input.Path),
-		LibraryID:    strings.TrimSpace(input.LibraryID),
-		MediaType:    strings.TrimSpace(input.MediaType),
-		ActionMode:   defaultString(strings.TrimSpace(input.ActionMode), "hardlink"),
-		Enabled:      input.Enabled,
-		WatchEnabled: input.WatchEnabled,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		Name:            strings.TrimSpace(input.Name),
+		Path:            strings.TrimSpace(input.Path),
+		LibraryID:       strings.TrimSpace(input.LibraryID),
+		MediaType:       strings.TrimSpace(input.MediaType),
+		ActionMode:      defaultString(strings.TrimSpace(input.ActionMode), "hardlink"),
+		OrganizerRuleID: strings.TrimSpace(input.OrganizerRuleID),
+		Enabled:         input.Enabled,
+		WatchEnabled:    input.WatchEnabled,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if err := validate(directory); err != nil {
 		return Directory{}, err
@@ -133,6 +134,9 @@ func applyUpdate(directory *Directory, input DirectoryUpdate) {
 	}
 	if input.ActionMode != nil {
 		directory.ActionMode = strings.TrimSpace(*input.ActionMode)
+	}
+	if input.OrganizerRuleID != nil {
+		directory.OrganizerRuleID = strings.TrimSpace(*input.OrganizerRuleID)
 	}
 	if input.Enabled != nil {
 		directory.Enabled = *input.Enabled

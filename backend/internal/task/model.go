@@ -6,6 +6,7 @@ type Type string
 
 const (
 	TypeLibraryScan       Type = "library_scan"
+	TypeDownloadWatch     Type = "download_watch"
 	TypeScrapeMedia       Type = "scrape_media"
 	TypeDownloadImages    Type = "download_images"
 	TypeTranslateMetadata Type = "translate_metadata"

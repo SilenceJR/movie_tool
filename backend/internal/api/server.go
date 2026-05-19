@@ -862,12 +862,22 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 	if err != nil {
 		return downloadDirectoryWatchRun{}, err
 	}
+	var taskRecord *task.Task
+	if len(directories) > 0 {
+		created := s.tasks.Enqueue(task.TypeDownloadWatch, "run download directory watch")
+		started, _ := s.tasks.Start(created.ID)
+		taskRecord = &started
+		s.tasks.Log(started.ID, task.LogLevelInfo, fmt.Sprintf("scanning %d watch-enabled download directories", len(directories)))
+	}
 
 	results := make([]downloadDirectoryScanResult, 0, len(directories))
 	failures := make([]downloadDirectoryWatchFailure, 0)
 	for _, directory := range directories {
 		result, status, err := s.scanDownloadDirectory(ctx, directory, options)
 		if err != nil {
+			if taskRecord != nil {
+				s.tasks.Log(taskRecord.ID, task.LogLevelWarn, fmt.Sprintf("failed to scan %s: %s", directory.Name, err))
+			}
 			failures = append(failures, downloadDirectoryWatchFailure{
 				DownloadDirectory: directory,
 				Status:            status,
@@ -877,7 +887,13 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 		}
 		results = append(results, result)
 	}
+	if taskRecord != nil {
+		message := fmt.Sprintf("download watch scanned %d directories, failed %d", len(results), len(failures))
+		completed, _ := s.tasks.Succeed(taskRecord.ID, message)
+		taskRecord = &completed
+	}
 	return downloadDirectoryWatchRun{
+		Task:                taskRecord,
 		DownloadDirectories: directories,
 		Results:             results,
 		Failed:              failures,
@@ -894,6 +910,7 @@ type downloadScanOptions struct {
 }
 
 type downloadDirectoryWatchRun struct {
+	Task                *task.Task                      `json:"task,omitempty"`
 	DownloadDirectories []download.Directory            `json:"download_directories"`
 	Results             []downloadDirectoryScanResult   `json:"results"`
 	Failed              []downloadDirectoryWatchFailure `json:"failed"`

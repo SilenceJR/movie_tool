@@ -1577,6 +1577,10 @@ func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T)
 	if body["count"] != float64(1) || body["failure_count"] != float64(0) {
 		t.Fatalf("expected one successful watch scan and no failures, got %#v", body)
 	}
+	taskBody := body["task"].(map[string]any)
+	if taskBody["type"] != "download_watch" || taskBody["status"] != "succeeded" {
+		t.Fatalf("expected succeeded download_watch parent task, got %#v", taskBody)
+	}
 	directories := body["download_directories"].([]any)
 	if len(directories) != 1 || directories[0].(map[string]any)["id"] != watchedDir["id"] {
 		t.Fatalf("expected only watched directory to be scanned, got %#v", directories)

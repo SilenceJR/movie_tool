@@ -2188,16 +2188,26 @@ func (s *Server) organizerPlanRequestFromMedia(ctx context.Context, input organi
 }
 
 func (s *Server) organizerPlanRequestFromLibrary(ctx context.Context, input organizer.PlanRequest) (organizer.PlanRequest, error) {
-	items, err := s.catalog.ListItems(ctx, catalog.ItemQuery{LibraryID: input.LibraryID})
+	mediaType := firstNonEmpty(input.MediaType, input.Rule.MediaType)
+	itemQuery := catalog.ItemQuery{
+		LibraryID:   input.LibraryID,
+		MediaType:   mediaType,
+		MatchStatus: catalog.MatchStatus(input.MatchStatus),
+	}
+	items, err := s.catalog.ListItems(ctx, itemQuery)
 	if err != nil {
 		return organizer.PlanRequest{}, err
 	}
-	files, err := s.mediaFiles.ListFiles(ctx, media.FileQuery{LibraryID: input.LibraryID, Status: media.FileStatusAvailable})
+	fileStatus := media.FileStatus(input.FileStatus)
+	if fileStatus == "" {
+		fileStatus = media.FileStatusAvailable
+	}
+	files, err := s.mediaFiles.ListFiles(ctx, media.FileQuery{LibraryID: input.LibraryID, Status: fileStatus})
 	if err != nil {
 		return organizer.PlanRequest{}, err
 	}
-	if len(files) == 0 {
-		return organizer.PlanRequest{}, fmt.Errorf("library has no available files")
+	if len(items) == 0 || len(files) == 0 {
+		return organizer.PlanRequest{}, fmt.Errorf("library has no files matching organizer filters")
 	}
 
 	itemByID := make(map[string]catalog.Item, len(items))
@@ -2218,7 +2228,7 @@ func (s *Server) organizerPlanRequestFromLibrary(ctx context.Context, input orga
 	input.Media = organizer.MediaInfo{
 		ID:        "library-" + input.LibraryID,
 		LibraryID: input.LibraryID,
-		MediaType: input.Rule.MediaType,
+		MediaType: mediaType,
 		Title:     "Library " + input.LibraryID,
 	}
 	input.Versions = make([]organizer.VersionInfo, 0, len(versionByID))
@@ -2238,7 +2248,10 @@ func (s *Server) organizerPlanRequestFromLibrary(ctx context.Context, input orga
 	}
 	input.Files = make([]organizer.FileInfo, 0, len(files))
 	for _, file := range files {
-		item := itemByID[file.MediaID]
+		item, ok := itemByID[file.MediaID]
+		if !ok {
+			continue
+		}
 		input.Files = append(input.Files, organizer.FileInfo{
 			ID:            file.ID,
 			MediaID:       file.MediaID,
@@ -2255,6 +2268,9 @@ func (s *Server) organizerPlanRequestFromLibrary(ctx context.Context, input orga
 			Year:          item.Year,
 			MediaType:     item.MediaType,
 		})
+	}
+	if len(input.Files) == 0 {
+		return organizer.PlanRequest{}, fmt.Errorf("library has no files matching organizer filters")
 	}
 	return input, nil
 }

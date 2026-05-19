@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"movie-tool/backend/internal/catalog"
 	"movie-tool/backend/internal/config"
 	"movie-tool/backend/internal/task"
 )
@@ -936,6 +937,41 @@ func TestCreateOrganizerPlanByLibraryID(t *testing.T) {
 	joined := strings.Join(targets, "\n")
 	if !strings.Contains(joined, "Inception (2010)") || !strings.Contains(joined, "Interstellar (2014)") {
 		t.Fatalf("expected per-media target folders, got:\n%s", joined)
+	}
+
+	items, err := server.catalog.ListItems(context.Background(), catalog.ItemQuery{LibraryID: libraryID, Title: "Inception"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected scanned Inception item, got %+v", items)
+	}
+	matched := catalog.MatchStatusMatched
+	if _, ok, err := server.catalog.UpdateItem(context.Background(), items[0].ID, catalog.ItemUpdate{MatchStatus: &matched}); err != nil || !ok {
+		t.Fatalf("mark item matched: ok=%v err=%v", ok, err)
+	}
+
+	filteredResponse := httptest.NewRecorder()
+	filteredRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/organizer/plan",
+		bytes.NewBufferString(`{"rule_id":"`+rule["id"].(string)+`","library_id":"`+libraryID+`","match_status":"matched","media_type":"movie","file_status":"available"}`),
+	)
+	server.ServeHTTP(filteredResponse, filteredRequest)
+	if filteredResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 filtered library organizer plan, got %d body=%s", filteredResponse.Code, filteredResponse.Body.String())
+	}
+	var filteredPlan map[string]any
+	if err := json.NewDecoder(filteredResponse.Body).Decode(&filteredPlan); err != nil {
+		t.Fatal(err)
+	}
+	filteredActions := filteredPlan["actions"].([]any)
+	if len(filteredActions) != 1 {
+		t.Fatalf("expected one filtered library action, got %d", len(filteredActions))
+	}
+	target := filteredActions[0].(map[string]any)["target_path"].(string)
+	if !strings.Contains(target, "Inception (2010)") || strings.Contains(target, "Interstellar") {
+		t.Fatalf("expected filtered target for matched Inception only, got %s", target)
 	}
 }
 

@@ -615,6 +615,15 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		writeError(w, http.StatusNotFound, fmt.Errorf("library not found"))
 		return
 	}
+	batchSize, err := parseOptionalInt(r.URL.Query().Get("batch_size"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if batchSize < 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("batch_size cannot be negative"))
+		return
+	}
 
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan library: "+found.Name)
 	taskRecord, _ = s.tasks.Start(taskRecord.ID)
@@ -634,8 +643,11 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("discovered %d media files", len(files)))
+	if batchSize > 0 {
+		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("importing files in batches of %d", batchSize))
+	}
 
-	imported, missingCount, err := s.importScannedFiles(r.Context(), files, found.ID)
+	imported, missingCount, batchCount, err := s.importScannedFiles(r.Context(), files, found.ID, batchSize)
 	if err != nil {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusInternalServerError, err)
@@ -650,6 +662,7 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		"imported":      imported,
 		"count":         len(files),
 		"missing_count": missingCount,
+		"batch_count":   batchCount,
 	})
 }
 
@@ -795,11 +808,23 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	batchSize, err := parseOptionalInt(r.URL.Query().Get("batch_size"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if batchSize < 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("batch_size cannot be negative"))
+		return
+	}
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan download directory: "+directory.Name)
 	taskRecord, _ = s.tasks.Start(taskRecord.ID)
 	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "walking "+directory.Path)
 	if minStableAge > 0 {
 		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("skipping files modified within %s", minStableAge))
+	}
+	if batchSize > 0 {
+		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("importing files in batches of %d", batchSize))
 	}
 
 	files, err := scanner.NewScanner().Walk(scanner.ScanRequest{
@@ -818,7 +843,7 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	imported, _, err := s.importScannedFiles(r.Context(), files, "")
+	imported, _, batchCount, err := s.importScannedFiles(r.Context(), files, "", batchSize)
 	if err != nil {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusInternalServerError, err)
@@ -844,6 +869,7 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		"files":              files,
 		"imported":           imported,
 		"count":              len(imported),
+		"batch_count":        batchCount,
 	}
 	if organizerPlan != nil {
 		response["organizer_plan"] = organizerPlan
@@ -876,7 +902,40 @@ func (s *Server) createOrganizerPlanForDownloadDirectory(ctx context.Context, ru
 	return s.organizer.SavePlan(ctx, plan)
 }
 
-func (s *Server) importScannedFiles(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string) ([]media.File, int, error) {
+func (s *Server) importScannedFiles(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string, batchSize int) ([]media.File, int, int, error) {
+	if batchSize <= 0 || batchSize >= len(files) {
+		imported, missingCount, err := s.importScannedFilesSingleBatch(ctx, files, markMissingLibraryID)
+		return imported, missingCount, batchCount(len(files), batchSize), err
+	}
+
+	imported := make([]media.File, 0, len(files))
+	for start := 0; start < len(files); start += batchSize {
+		end := start + batchSize
+		if end > len(files) {
+			end = len(files)
+		}
+		batchImported, _, err := s.importScannedFilesSingleBatch(ctx, files[start:end], "")
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		imported = append(imported, batchImported...)
+	}
+	missingCount := 0
+	if markMissingLibraryID != "" {
+		availablePaths := make([]string, 0, len(files))
+		for _, file := range files {
+			availablePaths = append(availablePaths, file.Path)
+		}
+		var err error
+		missingCount, err = s.markMissingByLibrary(ctx, markMissingLibraryID, availablePaths)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+	}
+	return imported, missingCount, batchCount(len(files), batchSize), nil
+}
+
+func (s *Server) importScannedFilesSingleBatch(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string) ([]media.File, int, error) {
 	if s.scanDB == nil {
 		return importScannedFilesWithStores(ctx, s.catalog, s.mediaFiles, files, markMissingLibraryID)
 	}
@@ -901,6 +960,41 @@ func (s *Server) importScannedFiles(ctx context.Context, files []scanner.ParsedF
 	}
 	committed = true
 	return imported, missingCount, nil
+}
+
+func (s *Server) markMissingByLibrary(ctx context.Context, libraryID string, availablePaths []string) (int, error) {
+	if s.scanDB == nil {
+		return s.mediaFiles.MarkMissingByLibrary(ctx, libraryID, availablePaths)
+	}
+	tx, err := s.scanDB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	missingCount, err := media.NewSQLStore(tx).MarkMissingByLibrary(ctx, libraryID, availablePaths)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	committed = true
+	return missingCount, nil
+}
+
+func batchCount(total int, batchSize int) int {
+	if total == 0 {
+		return 0
+	}
+	if batchSize <= 0 || batchSize >= total {
+		return 1
+	}
+	return (total + batchSize - 1) / batchSize
 }
 
 func importScannedFilesWithStores(ctx context.Context, catalogStore catalog.Store, mediaStore media.Store, files []scanner.ParsedFile, markMissingLibraryID string) ([]media.File, int, error) {

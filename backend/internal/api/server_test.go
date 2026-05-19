@@ -1133,6 +1133,9 @@ func TestScanLibrary(t *testing.T) {
 	if body["count"].(float64) != 1 {
 		t.Fatalf("expected count 1, got %#v", body["count"])
 	}
+	if body["batch_count"].(float64) != 1 {
+		t.Fatalf("expected batch_count 1, got %#v", body["batch_count"])
+	}
 
 	filesResponse := httptest.NewRecorder()
 	filesRequest := httptest.NewRequest(http.MethodGet, "/api/media-files?library_id="+created["id"].(string), nil)
@@ -1198,6 +1201,35 @@ func TestScanLibrary(t *testing.T) {
 	}
 	if versions[0]["resolution"] != "2160p" || versions[0]["source"] != "remux" || versions[0]["video_codec"] != "hevc" || versions[0]["hdr_format"] != "hdr10" {
 		t.Fatalf("unexpected parsed version metadata: %#v", versions[0])
+	}
+}
+
+func TestScanLibraryBatchSize(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"Inception.2010.mkv", "Interstellar.2014.mkv", "Tenet.2020.mkv"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("movie"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/libraries/"+library["id"].(string)+"/scan?batch_size=2", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 batched scan, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["batch_count"].(float64) != 2 {
+		t.Fatalf("expected two scan batches, got %#v", body["batch_count"])
+	}
+	if len(body["imported"].([]any)) != 3 {
+		t.Fatalf("expected three imported files, got %#v", body["imported"])
 	}
 }
 

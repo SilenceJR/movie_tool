@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -41,6 +42,7 @@ type Server struct {
 	scraper      scraper.Store
 	strm         strm.Store
 	tasks        *task.Queue
+	scanDB       transactionBeginner
 }
 
 type Dependencies struct {
@@ -56,6 +58,11 @@ type Dependencies struct {
 	Scraper      scraper.Store
 	STRM         strm.Store
 	Tasks        *task.Queue
+	ScanDB       transactionBeginner
+}
+
+type transactionBeginner interface {
+	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 }
 
 func NewServer(cfg config.Config) *Server {
@@ -115,6 +122,7 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 		scraper:      deps.Scraper,
 		strm:         deps.STRM,
 		tasks:        deps.Tasks,
+		scanDB:       deps.ScanDB,
 	}
 	server.routes()
 	return server
@@ -625,41 +633,7 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 	}
 	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("discovered %d media files", len(files)))
 
-	imported := make([]media.File, 0, len(files))
-	availablePaths := make([]string, 0, len(files))
-	for _, file := range files {
-		mediaID, versionID, err := s.ensureCatalogVersionForParsedFile(r.Context(), file)
-		if err != nil {
-			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		stored, err := s.mediaFiles.UpsertFile(r.Context(), media.FileInput{
-			MediaID:           mediaID,
-			VersionID:         versionID,
-			LibraryID:         file.LibraryID,
-			Path:              file.Path,
-			FileName:          file.FileName,
-			Extension:         file.Extension,
-			Size:              file.Size,
-			ModifiedAt:        file.ModifiedAt,
-			DetectedMediaType: file.MediaType,
-			ParsedTitle:       file.Title,
-			ParsedYear:        file.Year,
-			ParsedSeason:      file.Season,
-			ParsedEpisode:     file.Episode,
-			ParsedNumber:      file.Number,
-		})
-		if err != nil {
-			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		imported = append(imported, stored)
-		availablePaths = append(availablePaths, file.Path)
-	}
-
-	missingCount, err := s.mediaFiles.MarkMissingByLibrary(r.Context(), found.ID, availablePaths)
+	imported, missingCount, err := s.importScannedFiles(r.Context(), files, found.ID)
 	if err != nil {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusInternalServerError, err)
@@ -842,15 +816,60 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	imported := make([]media.File, 0, len(files))
-	for _, file := range files {
-		mediaID, versionID, err := s.ensureCatalogVersionForParsedFile(r.Context(), file)
-		if err != nil {
-			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-			writeError(w, http.StatusInternalServerError, err)
-			return
+	imported, _, err := s.importScannedFiles(r.Context(), files, "")
+	if err != nil {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("imported %d download files", len(imported)))
+	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, fmt.Sprintf("scan download directory: %s (%d files)", directory.Name, len(imported)))
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task":               taskRecord,
+		"download_directory": directory,
+		"target_library":     targetLibrary,
+		"files":              files,
+		"imported":           imported,
+		"count":              len(imported),
+	})
+}
+
+func (s *Server) importScannedFiles(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string) ([]media.File, int, error) {
+	if s.scanDB == nil {
+		return importScannedFilesWithStores(ctx, s.catalog, s.mediaFiles, files, markMissingLibraryID)
+	}
+
+	tx, err := s.scanDB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
 		}
-		stored, err := s.mediaFiles.UpsertFile(r.Context(), media.FileInput{
+	}()
+
+	imported, missingCount, err := importScannedFilesWithStores(ctx, catalog.NewSQLStore(tx), media.NewSQLStore(tx), files, markMissingLibraryID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, 0, err
+	}
+	committed = true
+	return imported, missingCount, nil
+}
+
+func importScannedFilesWithStores(ctx context.Context, catalogStore catalog.Store, mediaStore media.Store, files []scanner.ParsedFile, markMissingLibraryID string) ([]media.File, int, error) {
+	imported := make([]media.File, 0, len(files))
+	availablePaths := make([]string, 0, len(files))
+	for _, file := range files {
+		mediaID, versionID, err := ensureCatalogVersionForParsedFile(ctx, catalogStore, mediaStore, file)
+		if err != nil {
+			return nil, 0, err
+		}
+		stored, err := mediaStore.UpsertFile(ctx, media.FileInput{
 			MediaID:           mediaID,
 			VersionID:         versionID,
 			LibraryID:         file.LibraryID,
@@ -867,26 +886,28 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 			ParsedNumber:      file.Number,
 		})
 		if err != nil {
-			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-			writeError(w, http.StatusInternalServerError, err)
-			return
+			return nil, 0, err
 		}
 		imported = append(imported, stored)
+		availablePaths = append(availablePaths, file.Path)
 	}
-	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("imported %d download files", len(imported)))
-	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, fmt.Sprintf("scan download directory: %s (%d files)", directory.Name, len(imported)))
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"task":               taskRecord,
-		"download_directory": directory,
-		"target_library":     targetLibrary,
-		"files":              files,
-		"imported":           imported,
-		"count":              len(imported),
-	})
+
+	if markMissingLibraryID == "" {
+		return imported, 0, nil
+	}
+	missingCount, err := mediaStore.MarkMissingByLibrary(ctx, markMissingLibraryID, availablePaths)
+	if err != nil {
+		return nil, 0, err
+	}
+	return imported, missingCount, nil
 }
 
 func (s *Server) ensureCatalogVersionForParsedFile(ctx context.Context, file scanner.ParsedFile) (string, string, error) {
-	existingFile, ok, err := s.mediaFiles.GetFileByPath(ctx, file.Path)
+	return ensureCatalogVersionForParsedFile(ctx, s.catalog, s.mediaFiles, file)
+}
+
+func ensureCatalogVersionForParsedFile(ctx context.Context, catalogStore catalog.Store, mediaStore media.Store, file scanner.ParsedFile) (string, string, error) {
+	existingFile, ok, err := mediaStore.GetFileByPath(ctx, file.Path)
 	if err != nil {
 		return "", "", err
 	}
@@ -896,7 +917,7 @@ func (s *Server) ensureCatalogVersionForParsedFile(ctx context.Context, file sca
 
 	mediaID := existingFile.MediaID
 	if mediaID == "" {
-		items, err := s.catalog.ListItems(ctx, catalog.ItemQuery{
+		items, err := catalogStore.ListItems(ctx, catalog.ItemQuery{
 			LibraryID: file.LibraryID,
 			MediaType: file.MediaType,
 			Title:     firstNonEmpty(file.Title, file.Number),
@@ -908,7 +929,7 @@ func (s *Server) ensureCatalogVersionForParsedFile(ctx context.Context, file sca
 		if len(items) > 0 {
 			mediaID = items[0].ID
 		} else {
-			item, err := s.catalog.CreateItem(ctx, catalog.ItemInput{
+			item, err := catalogStore.CreateItem(ctx, catalog.ItemInput{
 				LibraryID:    file.LibraryID,
 				MediaType:    file.MediaType,
 				Title:        firstNonEmpty(file.Title, file.Number),
@@ -927,11 +948,11 @@ func (s *Server) ensureCatalogVersionForParsedFile(ctx context.Context, file sca
 
 	versionID := existingFile.VersionID
 	if versionID == "" {
-		versions, err := s.catalog.ListVersions(ctx, mediaID)
+		versions, err := catalogStore.ListVersions(ctx, mediaID)
 		if err != nil {
 			return "", "", err
 		}
-		version, err := s.catalog.CreateVersion(ctx, mediaID, catalog.VersionInput{
+		version, err := catalogStore.CreateVersion(ctx, mediaID, catalog.VersionInput{
 			Name:          versionName(file),
 			Resolution:    file.Resolution,
 			Source:        file.Source,

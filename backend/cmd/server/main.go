@@ -44,6 +44,7 @@ func main() {
 		Scraper:      scraper.NewSQLStore(db),
 		STRM:         strm.NewSQLStore(db),
 		Tasks:        task.NewQueueWithStore(task.NewSQLStore(db)),
+		ScanDB:       db,
 	})
 	server.StartAutomationTicker(context.Background(), time.Minute)
 

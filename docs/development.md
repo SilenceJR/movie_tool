@@ -89,6 +89,7 @@ backend/internal/task         任务系统
 - 扫描输出会带上 library 元信息，并复用 `ParseFile` 的标题、年份、季集、番号、版本解析能力。
 - 扫描 API 会把解析结果落入 catalog 与 media_files；隐藏文件/目录与字幕、NFO、图片等 sidecar 文件不会进入媒体列表；下载目录扫描可复用文件修改时间稳定性过滤，为 watcher 接入预留安全边界。
 - `media_files.normalized_path` 已通过迁移提升为唯一索引，避免同一路径被重复入库。
+- 生产 SQLite 路径下，扫描导入会在同一事务内完成 media item、version、media_file 与 missing 标记更新；内存 store 保持原有测试路径。
 
 ### scraper
 
@@ -101,7 +102,7 @@ backend/internal/task         任务系统
 ```text
 1. 为下载目录接入真实 watcher，文件创建/完成且通过稳定性检测后自动触发扫描与匹配流程。
 2. 为下载目录监听增加事件去抖、失败重试和批量合并。
-3. 为扫描入库增加事务边界，确保 catalog、version、media_file 写入失败时整体回滚。
+3. 为扫描任务增加分批导入和单文件失败隔离，避免超大媒体库一次事务过长。
 4. 为 organizer 执行结果增加回滚/重试和更细的失败恢复。
 5. 为批量 organizer plan 增加按路径前缀、下载目录来源和目标目录冲突级别过滤。
 ```

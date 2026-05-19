@@ -1621,6 +1621,58 @@ func TestScrapeDecisionAppliesCandidateMetadata(t *testing.T) {
 	assertTranslationList(t, server, "/api/media/"+mediaID+"/translations?language=zh-CN", "盗梦空间")
 }
 
+func TestScrapeDecisionDoesNotOverwriteWithEmptyCandidateFields(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+
+	mediaID := createJSON(t, server, "/api/media", `{
+		"library_id":"library-1",
+		"media_type":"movie",
+		"title":"Existing Title",
+		"original_title":"Existing Original",
+		"display_title":"Existing Display",
+		"year":1999,
+		"overview":"Existing overview",
+		"display_language":"zh-CN"
+	}`)["id"].(string)
+	candidate := createJSON(t, server, "/api/scrape-candidates", `{
+		"media_id":"`+mediaID+`",
+		"provider":"manual",
+		"external_id":"manual-empty",
+		"score":80
+	}`)
+
+	decisionResponse := httptest.NewRecorder()
+	decisionRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/scrape-decisions",
+		bytes.NewBufferString(`{"media_id":"`+mediaID+`","candidate_id":"`+candidate["id"].(string)+`","decision":"select"}`),
+	)
+	server.ServeHTTP(decisionResponse, decisionRequest)
+	if decisionResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 decision, got %d body=%s", decisionResponse.Code, decisionResponse.Body.String())
+	}
+
+	getMediaResponse := httptest.NewRecorder()
+	getMediaRequest := httptest.NewRequest(http.MethodGet, "/api/media/"+mediaID, nil)
+	server.ServeHTTP(getMediaResponse, getMediaRequest)
+	if getMediaResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 media, got %d body=%s", getMediaResponse.Code, getMediaResponse.Body.String())
+	}
+	var mediaItem map[string]any
+	if err := json.NewDecoder(getMediaResponse.Body).Decode(&mediaItem); err != nil {
+		t.Fatal(err)
+	}
+	if mediaItem["title"] != "Existing Title" || mediaItem["original_title"] != "Existing Original" || mediaItem["display_title"] != "Existing Display" || mediaItem["overview"] != "Existing overview" {
+		t.Fatalf("expected existing metadata to be preserved, got %#v", mediaItem)
+	}
+	if mediaItem["year"].(float64) != 1999 {
+		t.Fatalf("expected existing year, got %#v", mediaItem["year"])
+	}
+	if mediaItem["match_status"] != "matched" {
+		t.Fatalf("expected matched status, got %#v", mediaItem["match_status"])
+	}
+}
+
 func TestConfig(t *testing.T) {
 	server := NewServer(config.Config{
 		Host:     "127.0.0.1",

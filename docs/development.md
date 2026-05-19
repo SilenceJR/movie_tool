@@ -93,13 +93,13 @@ backend/internal/task         任务系统
 
 - 已有轻量候选评分规则：番号精确匹配、标题相似度、年份匹配/冲突，并输出 0-100 分与原因。
 - 创建候选时，如果提供 `media_file_id` 且未提供完整分数，会读取已入库文件的 parsed title/year/number 自动评分。
-- 候选创建后会基于当前候选列表刷新未锁定作品的 `match_status`，人工选择候选后会应用标题、年份、简介和本地化元数据。
+- 候选创建后会基于当前候选列表刷新未锁定作品的 `match_status`，人工选择候选后会应用标题、年份、简介和本地化元数据；空候选字段不会覆盖作品已有元数据。
 
 ## 4. 下一步建议
 
 ```text
 1. 为下载目录接入真实 watcher，文件创建/完成后自动触发扫描与匹配流程。
-2. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
+2. 完善 scrape decision，选择候选后记录 external_ids，便于后续增量刮削和跨源去重。
 3. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
 4. 为 organizer 执行结果增加回滚/重试和更细的失败恢复。
 5. 为批量 organizer plan 增加按 match_status、file_status、media_type 的过滤条件。

@@ -1634,20 +1634,28 @@ func (s *Server) applyScrapeDecision(ctx context.Context, input scraper.Decision
 		return map[string]any{"status": "skipped", "reason": "candidate not found"}, nil
 	}
 
-	title := candidate.Title
-	originalTitle := candidate.OriginalTitle
-	year := candidate.Year
-	overview := candidate.Overview
 	matchStatus := catalog.MatchStatusMatched
 	locked := input.Locked
 	update := catalog.ItemUpdate{
-		Title:         &title,
-		OriginalTitle: &originalTitle,
-		DisplayTitle:  &title,
-		Year:          &year,
-		Overview:      &overview,
-		MatchStatus:   &matchStatus,
-		Locked:        &locked,
+		MatchStatus: &matchStatus,
+		Locked:      &locked,
+	}
+	if candidate.Title != "" {
+		title := candidate.Title
+		update.Title = &title
+		update.DisplayTitle = &title
+	}
+	if candidate.OriginalTitle != "" {
+		originalTitle := candidate.OriginalTitle
+		update.OriginalTitle = &originalTitle
+	}
+	if candidate.Year > 0 {
+		year := candidate.Year
+		update.Year = &year
+	}
+	if candidate.Overview != "" {
+		overview := candidate.Overview
+		update.Overview = &overview
 	}
 	item, ok, err := s.catalog.UpdateItem(ctx, input.MediaID, update)
 	if err != nil {

@@ -75,6 +75,27 @@ ORDER BY created_at ASC, id ASC`)
 	return directories, rows.Err()
 }
 
+func (s *SQLStore) ListWatchEnabled(ctx context.Context) ([]Directory, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, name, path, library_id, media_type, action_mode, enabled, watch_enabled, created_at, updated_at
+FROM download_directories
+WHERE enabled = 1 AND watch_enabled = 1
+ORDER BY created_at ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var directories []Directory
+	for rows.Next() {
+		directory, err := scanDirectory(rows)
+		if err != nil {
+			return nil, err
+		}
+		directories = append(directories, directory)
+	}
+	return directories, rows.Err()
+}
+
 func (s *SQLStore) Update(ctx context.Context, id string, input DirectoryUpdate) (Directory, bool, error) {
 	directory, ok, err := s.Get(ctx, id)
 	if err != nil || !ok {

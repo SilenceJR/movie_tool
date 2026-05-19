@@ -13,6 +13,7 @@ type Store interface {
 	Create(context.Context, DirectoryInput) (Directory, error)
 	Get(context.Context, string) (Directory, bool, error)
 	List(context.Context) ([]Directory, error)
+	ListWatchEnabled(context.Context) ([]Directory, error)
 	Update(context.Context, string, DirectoryUpdate) (Directory, bool, error)
 	Delete(context.Context, string) (bool, error)
 }
@@ -56,12 +57,20 @@ func (s *MemoryStore) List(context.Context) ([]Directory, error) {
 	for _, directory := range s.directories {
 		directories = append(directories, directory)
 	}
-	sort.Slice(directories, func(i, j int) bool {
-		if directories[i].CreatedAt.Equal(directories[j].CreatedAt) {
-			return directories[i].ID < directories[j].ID
+	sortDirectories(directories)
+	return directories, nil
+}
+
+func (s *MemoryStore) ListWatchEnabled(context.Context) ([]Directory, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	directories := make([]Directory, 0, len(s.directories))
+	for _, directory := range s.directories {
+		if directory.Enabled && directory.WatchEnabled {
+			directories = append(directories, directory)
 		}
-		return directories[i].CreatedAt.Before(directories[j].CreatedAt)
-	})
+	}
+	sortDirectories(directories)
 	return directories, nil
 }
 
@@ -159,4 +168,13 @@ func defaultString(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func sortDirectories(directories []Directory) {
+	sort.Slice(directories, func(i, j int) bool {
+		if directories[i].CreatedAt.Equal(directories[j].CreatedAt) {
+			return directories[i].ID < directories[j].ID
+		}
+		return directories[i].CreatedAt.Before(directories[j].CreatedAt)
+	})
 }

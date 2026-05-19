@@ -54,7 +54,7 @@ backend/internal/task         任务系统
 - 已有 `/api/organizer/plan` dry-run 整理计划入口。
 - 已有 `/api/libraries/{id}/scan` 扫描入口，会递归发现媒体文件，创建或复用 media item/version，写入 `media_files`，并标记缺失文件。
 - 已有 `/api/download-directories` CRUD 和 `/api/download-directories/{id}/scan`；下载目录可绑定目标媒体库，扫描完成目录文件并作为待整理来源入库。
-- 已有 `/api/automations` CRUD、pause、resume、run、runs；生产入口使用 SQL store，手动 run 会创建 task 与 automation_run。
+- 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
 - 已有媒体文件解析器。
 - 已有第一版数据库迁移 SQL。
@@ -69,7 +69,7 @@ backend/internal/task         任务系统
 - 已有 `Store` 接口和内存版 `MemoryStore`，支持自动化规则 List/Get/Create/Update/Delete。
 - `MemoryStore` 默认创建启用的自动化，并基于 `NextRun` 自动维护 `next_run_at`；暂停时清空，恢复或修改计划时重新计算。
 - 已支持 `RecordRun`/`ListRuns` 记录自动化运行历史；API server 已接入内存与 SQL store。
-- 调度器当前仍未在生产启动流程中作为后台 ticker 常驻运行，下一步需要把 due automation tick 接入 server 生命周期。
+- 已有 `POST /api/automations/run-due` 可触发到期规则并记录运行历史；调度器当前仍未在生产启动流程中作为后台 ticker 常驻运行，下一步需要把 due automation tick 接入 server 生命周期。
 
 ### organizer
 
@@ -98,7 +98,7 @@ backend/internal/task         任务系统
 ## 4. 下一步建议
 
 ```text
-1. 将到期 automation tick 接入 API/server 生命周期，并记录 automation_runs。
+1. 将到期 automation tick 接入 server 生命周期，作为后台 ticker 常驻运行。
 2. 为下载目录接入真实 watcher，文件创建/完成后自动触发扫描与匹配流程。
 3. 扩展 organizer dry-run API，支持 rule_id + library_id 批量组装计划。
 4. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。

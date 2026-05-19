@@ -199,6 +199,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/organizer/actions", s.handleListOrganizerActions)
 	s.mux.HandleFunc("GET /api/automations", s.handleListAutomations)
 	s.mux.HandleFunc("POST /api/automations", s.handleCreateAutomation)
+	s.mux.HandleFunc("POST /api/automations/run-due", s.handleRunDueAutomations)
 	s.mux.HandleFunc("GET /api/automations/", s.handleGetAutomation)
 	s.mux.HandleFunc("PATCH /api/automations/", s.handleUpdateAutomation)
 	s.mux.HandleFunc("DELETE /api/automations/", s.handleDeleteAutomation)
@@ -2305,6 +2306,42 @@ func (s *Server) handleCreateAutomation(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, created)
 }
 
+func (s *Server) handleRunDueAutomations(w http.ResponseWriter, r *http.Request) {
+	now, err := parseOptionalTime(r.URL.Query().Get("now"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	enabled := true
+	automations, err := s.automations.ListByQuery(r.Context(), automation.Query{Enabled: &enabled})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	results := make([]map[string]any, 0)
+	for _, item := range automations {
+		if item.NextRunAt == nil || item.NextRunAt.After(now) {
+			continue
+		}
+		taskRecord, run, err := s.queueAutomationRun(r.Context(), item)
+		result := map[string]any{"automation": item}
+		if err != nil {
+			result["error"] = err.Error()
+		} else {
+			result["task"] = taskRecord
+			result["run"] = run
+		}
+		results = append(results, result)
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"now":     now,
+		"count":   len(results),
+		"results": results,
+	})
+}
+
 func (s *Server) handleGetAutomation(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r.URL.Path, "/api/automations/")
 	if err != nil {
@@ -2397,23 +2434,11 @@ func (s *Server) handleAutomationAction(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusNotFound, fmt.Errorf("automation not found"))
 			return
 		}
-		taskType, err := automationTaskType(found.Type)
+		queued, run, err := s.queueAutomationRun(r.Context(), found)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		queued := s.tasks.Enqueue(taskType, "automation: "+found.Name)
-		s.tasks.Log(queued.ID, task.LogLevelInfo, fmt.Sprintf("automation %s (%s) queued task %s", found.ID, found.Type, queued.ID))
-		run, err := s.automations.RecordRun(r.Context(), automation.RecordRunInput{
-			AutomationID: found.ID,
-			TaskID:       queued.ID,
-			Status:       automation.RunPending,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		s.tasks.Log(queued.ID, task.LogLevelInfo, "automation run recorded: "+run.ID)
 		writeJSON(w, http.StatusAccepted, map[string]any{"task": queued, "run": run})
 	case "runs":
 		runs, err := s.automations.ListRuns(r.Context(), id)
@@ -2425,6 +2450,25 @@ func (s *Server) handleAutomationAction(w http.ResponseWriter, r *http.Request) 
 	default:
 		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported automation action %q", action))
 	}
+}
+
+func (s *Server) queueAutomationRun(ctx context.Context, item automation.Automation) (task.Task, automation.Run, error) {
+	taskType, err := automationTaskType(item.Type)
+	if err != nil {
+		return task.Task{}, automation.Run{}, err
+	}
+	queued := s.tasks.Enqueue(taskType, "automation: "+item.Name)
+	s.tasks.Log(queued.ID, task.LogLevelInfo, fmt.Sprintf("automation %s (%s) queued task %s", item.ID, item.Type, queued.ID))
+	run, err := s.automations.RecordRun(ctx, automation.RecordRunInput{
+		AutomationID: item.ID,
+		TaskID:       queued.ID,
+		Status:       automation.RunPending,
+	})
+	if err != nil {
+		return task.Task{}, automation.Run{}, err
+	}
+	s.tasks.Log(queued.ID, task.LogLevelInfo, "automation run recorded: "+run.ID)
+	return queued, run, nil
 }
 
 func (s *Server) updateAutomationEnabled(w http.ResponseWriter, r *http.Request, id string, enabled bool) {
@@ -2535,6 +2579,17 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseOptionalTime(value string) (time.Time, error) {
+	if value == "" {
+		return time.Now().UTC(), nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid time query value %q", value)
+	}
+	return parsed.UTC(), nil
 }
 
 func parseBoolQuery(value string) (bool, error) {

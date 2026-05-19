@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"movie-tool/backend/internal/config"
 )
@@ -1257,6 +1258,56 @@ func TestAutomationCRUDAndRun(t *testing.T) {
 	}
 	if len(disabledAutomations) != 1 {
 		t.Fatalf("expected 1 disabled automation, got %d", len(disabledAutomations))
+	}
+}
+
+func TestRunDueAutomations(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+
+	created := createJSON(t, server, "/api/automations", `{
+		"name":"Due Scan",
+		"automation_type":"scan_library",
+		"schedule_type":"interval",
+		"schedule":"1h",
+		"scope":{"library_id":"library-1"}
+	}`)
+	nextRunAt, err := time.Parse(time.RFC3339Nano, created["next_run_at"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/automations/run-due?now="+url.QueryEscape(nextRunAt.Add(time.Second).Format(time.RFC3339Nano)), nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 run due, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["count"].(float64) != 1 {
+		t.Fatalf("expected one due automation, got %#v", body)
+	}
+	results := body["results"].([]any)
+	result := results[0].(map[string]any)
+	taskBody := result["task"].(map[string]any)
+	if taskBody["type"] != "library_scan" {
+		t.Fatalf("expected library_scan task, got %#v", taskBody)
+	}
+
+	runsResponse := httptest.NewRecorder()
+	runsRequest := httptest.NewRequest(http.MethodGet, "/api/automations/"+created["id"].(string)+"/runs", nil)
+	server.ServeHTTP(runsResponse, runsRequest)
+	if runsResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 runs, got %d body=%s", runsResponse.Code, runsResponse.Body.String())
+	}
+	var runs []map[string]any
+	if err := json.NewDecoder(runsResponse.Body).Decode(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected one run, got %d", len(runs))
 	}
 }
 

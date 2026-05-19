@@ -48,31 +48,34 @@ backend/internal/task         任务系统
 - 已有 HTTP server。
 - 已有 `/api/health`。
 - 已有 `/api/config`。
+- 已有 SQLite 驱动注册、数据库打开、连接 PRAGMA、embedded migration runner 启动集成。
 - 已有 `/api/libraries` CRUD；生产入口使用 SQL store，测试默认使用内存 store。
-- 已有 `/api/tasks` 列表与任务 retry 入口。
+- 已有 `/api/tasks` 列表、日志、取消、retry 入口；扫描/清理这类同步执行的 API 会记录 running/succeeded/failed 状态和任务日志。
 - 已有 `/api/organizer/plan` dry-run 整理计划入口。
-- 已有 `/api/libraries/{id}/scan` 扫描入口，当前返回解析结果并创建扫描任务记录，尚未写入数据库。
-- 已有内存版 `/api/automations` CRUD、pause、resume、run、runs。
+- 已有 `/api/libraries/{id}/scan` 扫描入口，会递归发现媒体文件，创建或复用 media item/version，写入 `media_files`，并标记缺失文件。
+- 已有 `/api/automations` CRUD、pause、resume、run、runs；生产入口使用 SQL store，手动 run 会创建 task 与 automation_run。
+- 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
 - 已有媒体文件解析器。
 - 已有第一版数据库迁移 SQL。
 - 已有 migration runner 与 schema_migrations 记录逻辑。
 - 已有内存 task queue。
 - 已有自动化 scheduler，可把到期自动化转换为普通 task。
 - 已有自动化内存 store，支持运行历史和 next_run_at 计算。
-- 已有 SQLite 打开、迁移执行和 libraries SQL store 接线代码。
-- 当前环境无法下载 SQLite driver；补齐 `modernc.org/sqlite` 依赖及空白导入后，生产入口即可使用真实 SQLite。
+- 已有 SQLite 打开、迁移执行和各核心 SQL store 接线代码。
 
 ### automation
 
 - 已有 `Store` 接口和内存版 `MemoryStore`，支持自动化规则 List/Get/Create/Update/Delete。
 - `MemoryStore` 默认创建启用的自动化，并基于 `NextRun` 自动维护 `next_run_at`；暂停时清空，恢复或修改计划时重新计算。
-- 已支持 `RecordRun`/`ListRuns` 记录自动化运行历史；内存实现用于开发和单元测试，尚未接入 API server。
+- 已支持 `RecordRun`/`ListRuns` 记录自动化运行历史；API server 已接入内存与 SQL store。
+- 调度器当前仍未在生产启动流程中作为后台 ticker 常驻运行，下一步需要把 due automation tick 接入 server 生命周期。
 
 ### organizer
 
 - 已有 dry-run 文件整理计划器：输入媒体基础信息、版本信息、文件列表和 Rule，输出 Plan 与待执行 Actions。
 - 默认支持 movie、tv、av 模板；Rule 未指定模板时按媒体类型补齐默认模板。
 - planner 只生成计划，不执行真实移动、复制或链接操作；同一媒体的多版本文件会落入同一媒体目录。
+- 当前 `POST /api/organizer/plan` 仍需要调用方显式传入 media/versions/files，后续应支持基于 `media_id` 或 `library_id` 自动从库内数据组装 dry-run。
 
 ### scanner
 
@@ -80,19 +83,20 @@ backend/internal/task         任务系统
 - 支持常见视频扩展名，例如 `.mkv`、`.mp4`、`.avi`、`.m2ts`、`.ts`。
 - 忽略隐藏文件、隐藏目录和非媒体 sidecar 文件。
 - 扫描输出会带上 library 元信息，并复用 `ParseFile` 的标题、年份、季集、番号、版本解析能力。
+- 扫描 API 会把解析结果落入 catalog 与 media_files；隐藏文件/目录与字幕、NFO、图片等 sidecar 文件不会进入媒体列表。
 
-### scanner
+### scraper
 
-- 已有文件名解析器 `ParseFile`，可识别电影年份、剧集季集、AV 番号、分辨率、来源、编码、HDR、字幕标记和发布组。
-- 已有目录扫描器 `Scanner.Walk` / `Walk`：输入扫描根目录和库信息，递归发现常见视频扩展名并返回 `ParsedFile` 列表。
-- 扫描阶段只做文件发现与解析，不连接数据库，不写入 `media_files`；隐藏文件/目录与字幕、NFO、图片等 sidecar 文件不会进入媒体列表。
+- 已有轻量候选评分规则：番号精确匹配、标题相似度、年份匹配/冲突，并输出 0-100 分与原因。
+- 创建候选时，如果提供 `media_file_id` 且未提供完整分数，会读取已入库文件的 parsed title/year/number 自动评分。
+- 候选创建后会基于当前候选列表刷新未锁定作品的 `match_status`，人工选择候选后会应用标题、年份、简介和本地化元数据。
 
 ## 4. 下一步建议
 
 ```text
-1. 接入 SQLite。
-2. 将应用启动流程接入 migration runner。
-3. 实现 libraries CRUD。
-4. 实现 scanner 将文件写入 media_files。
-5. 实现 task queue。
+1. 将到期 automation tick 接入 API/server 生命周期，并记录 automation_runs。
+2. 扩展 organizer dry-run API，支持 rule_id + media_id/library_id 自动组装计划。
+3. 为 organizer plan 增加磁盘冲突检测和 conflict_policy dry-run 预演。
+4. 完善 scrape decision，避免空字段覆盖已有元数据，并记录 external_ids。
+5. 为扫描入库增加事务边界和 media_files.normalized_path 唯一约束迁移。
 ```

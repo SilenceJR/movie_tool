@@ -10,12 +10,18 @@ import (
 
 type Store interface {
 	List(context.Context) ([]Automation, error)
+	ListByQuery(context.Context, Query) ([]Automation, error)
 	Get(context.Context, string) (Automation, bool, error)
 	Create(context.Context, CreateInput) (Automation, error)
 	Update(context.Context, string, UpdateInput) (Automation, bool, error)
 	Delete(context.Context, string) (bool, error)
 	RecordRun(context.Context, RecordRunInput) (Run, error)
 	ListRuns(context.Context, string) ([]Run, error)
+}
+
+type Query struct {
+	Type    Type
+	Enabled *bool
 }
 
 type CreateInput struct {
@@ -63,11 +69,21 @@ func NewMemoryStore() *MemoryStore {
 }
 
 func (s *MemoryStore) List(context.Context) ([]Automation, error) {
+	return s.ListByQuery(context.Background(), Query{})
+}
+
+func (s *MemoryStore) ListByQuery(_ context.Context, query Query) ([]Automation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	automations := make([]Automation, 0, len(s.automations))
 	for _, automation := range s.automations {
+		if query.Type != "" && automation.Type != query.Type {
+			continue
+		}
+		if query.Enabled != nil && automation.Enabled != *query.Enabled {
+			continue
+		}
 		automations = append(automations, cloneAutomation(automation))
 	}
 	sort.Slice(automations, func(i, j int) bool {

@@ -36,6 +36,15 @@ func TestMemoryStoreCreateDefaultsEnabled(t *testing.T) {
 	if len(automations) != 1 {
 		t.Fatalf("expected 1 automation, got %d", len(automations))
 	}
+
+	enabled := true
+	filtered, err := store.ListByQuery(context.Background(), Query{Enabled: &enabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 enabled automation, got %d", len(filtered))
+	}
 }
 
 func TestMemoryStoreUpdatePauseResume(t *testing.T) {

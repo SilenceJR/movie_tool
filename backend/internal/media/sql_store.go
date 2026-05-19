@@ -124,13 +124,28 @@ INSERT INTO media_files (
 }
 
 func (s *SQLStore) ListFilesByLibrary(ctx context.Context, libraryID string) ([]File, error) {
+	return s.ListFiles(ctx, FileQuery{LibraryID: libraryID})
+}
+
+func (s *SQLStore) ListFiles(ctx context.Context, query FileQuery) ([]File, error) {
+	where := "WHERE 1 = 1"
+	args := make([]any, 0, 2)
+	if query.LibraryID != "" {
+		where += " AND library_id = ?"
+		args = append(args, query.LibraryID)
+	}
+	if query.Status != "" {
+		where += " AND file_status = ?"
+		args = append(args, string(query.Status))
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, media_id, version_id, library_id, path, normalized_path, file_name, extension, size, modified_at,
        file_status, is_strm, strm_target, detected_media_type, parsed_title, parsed_year,
        parsed_season, parsed_episode, parsed_number, created_at, updated_at
 FROM media_files
-WHERE library_id = ?
-ORDER BY path ASC`, libraryID)
+`+where+`
+ORDER BY path ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +181,59 @@ WHERE normalized_path = ?`, normalizePath(path))
 		return File{}, false, err
 	}
 	return file, true, nil
+}
+
+func (s *SQLStore) MarkMissingByLibrary(ctx context.Context, libraryID string, availablePaths []string) (int, error) {
+	files, err := s.ListFilesByLibrary(ctx, libraryID)
+	if err != nil {
+		return 0, err
+	}
+
+	available := make(map[string]struct{}, len(availablePaths))
+	for _, path := range availablePaths {
+		available[normalizePath(path)] = struct{}{}
+	}
+
+	changed := 0
+	now := s.now().UTC()
+	for _, file := range files {
+		if _, ok := available[file.NormalizedPath]; ok {
+			continue
+		}
+		if file.Status == FileStatusMissing {
+			continue
+		}
+		_, err := s.db.ExecContext(ctx, `
+UPDATE media_files
+SET file_status = ?, updated_at = ?
+WHERE id = ?`,
+			string(FileStatusMissing),
+			formatTime(now),
+			file.ID,
+		)
+		if err != nil {
+			return changed, err
+		}
+		changed++
+	}
+	return changed, nil
+}
+
+func (s *SQLStore) DeleteMissingByLibrary(ctx context.Context, libraryID string) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+DELETE FROM media_files
+WHERE library_id = ? AND file_status = ?`,
+		libraryID,
+		string(FileStatusMissing),
+	)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(affected), nil
 }
 
 type fileScanner interface {

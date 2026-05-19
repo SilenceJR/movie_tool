@@ -2,104 +2,111 @@ package task
 
 import (
 	"context"
-	"fmt"
-	"sync"
-	"time"
 )
 
 type Handler func(context.Context, Task) error
 
 type Queue struct {
-	mu       sync.Mutex
-	tasks    map[string]Task
+	store    Store
 	handlers map[Type]Handler
-	now      func() time.Time
 }
 
 func NewQueue() *Queue {
+	return NewQueueWithStore(NewMemoryStore())
+}
+
+func NewQueueWithStore(store Store) *Queue {
 	return &Queue{
-		tasks:    make(map[string]Task),
+		store:    store,
 		handlers: make(map[Type]Handler),
-		now:      time.Now,
 	}
 }
 
 func (q *Queue) Register(taskType Type, handler Handler) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	q.handlers[taskType] = handler
 }
 
 func (q *Queue) Enqueue(taskType Type, message string) Task {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	now := q.now()
-	task := Task{
-		ID:        fmt.Sprintf("%d", now.UnixNano()),
-		Type:      taskType,
-		Status:    StatusPending,
-		Progress:  0,
-		Message:   message,
-		CreatedAt: now,
-		UpdatedAt: now,
+	task, err := q.store.Create(context.Background(), CreateInput{
+		Type:    taskType,
+		Status:  StatusPending,
+		Message: message,
+	})
+	if err != nil {
+		return Task{Type: taskType, Status: StatusFailed, Message: message, Error: err.Error()}
 	}
-	q.tasks[task.ID] = task
+	q.addLog(context.Background(), task.ID, LogLevelInfo, "task queued")
 	return task
 }
 
 func (q *Queue) Run(ctx context.Context, id string) Task {
-	q.mu.Lock()
-	task, ok := q.tasks[id]
+	task, ok, err := q.store.Get(ctx, id)
+	if err != nil {
+		return Task{ID: id, Status: StatusFailed, Error: err.Error()}
+	}
 	if !ok {
-		q.mu.Unlock()
 		return Task{ID: id, Status: StatusFailed, Error: "task not found"}
 	}
 	handler, ok := q.handlers[task.Type]
 	if !ok {
-		task.Status = StatusFailed
-		task.Error = "task handler not registered"
-		task.UpdatedAt = q.now()
-		q.tasks[id] = task
-		q.mu.Unlock()
-		return task
+		status := StatusFailed
+		taskError := "task handler not registered"
+		updated, _, _ := q.store.Update(ctx, id, UpdateInput{Status: &status, Error: &taskError})
+		q.addLog(ctx, id, LogLevelError, taskError)
+		return updated
 	}
-	task.Status = StatusRunning
-	task.UpdatedAt = q.now()
-	q.tasks[id] = task
-	q.mu.Unlock()
+	running := StatusRunning
+	task, _, _ = q.store.Update(ctx, id, UpdateInput{Status: &running})
+	q.addLog(ctx, id, LogLevelInfo, "task started")
 
-	err := handler(ctx, task)
-
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	task = q.tasks[id]
-	task.UpdatedAt = q.now()
+	err = handler(ctx, task)
 	if err != nil {
-		task.Status = StatusFailed
-		task.Error = err.Error()
-		q.tasks[id] = task
-		return task
+		failed := StatusFailed
+		taskError := err.Error()
+		updated, _, _ := q.store.Update(ctx, id, UpdateInput{Status: &failed, Error: &taskError})
+		q.addLog(ctx, id, LogLevelError, taskError)
+		return updated
 	}
-	task.Status = StatusSucceeded
-	task.Progress = 100
-	q.tasks[id] = task
-	return task
+	succeeded := StatusSucceeded
+	progress := 100
+	updated, _, _ := q.store.Update(ctx, id, UpdateInput{Status: &succeeded, Progress: &progress})
+	q.addLog(ctx, id, LogLevelInfo, "task succeeded")
+	return updated
 }
 
 func (q *Queue) Get(id string) (Task, bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	task, ok := q.tasks[id]
+	task, ok, _ := q.store.Get(context.Background(), id)
+	return task, ok
+}
+
+func (q *Queue) Cancel(id string) (Task, bool) {
+	status := StatusCanceled
+	task, ok, _ := q.store.Update(context.Background(), id, UpdateInput{Status: &status})
+	if ok {
+		q.addLog(context.Background(), id, LogLevelWarn, "task canceled")
+	}
 	return task, ok
 }
 
 func (q *Queue) List() []Task {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	tasks := make([]Task, 0, len(q.tasks))
-	for _, task := range q.tasks {
-		tasks = append(tasks, task)
-	}
+	tasks, _ := q.store.List(context.Background())
 	return tasks
+}
+
+func (q *Queue) ListByQuery(query Query) []Task {
+	tasks, _ := q.store.ListByQuery(context.Background(), query)
+	return tasks
+}
+
+func (q *Queue) Logs(id string) []LogEntry {
+	entries, _ := q.store.ListLogs(context.Background(), id)
+	return entries
+}
+
+func (q *Queue) addLog(ctx context.Context, id string, level LogLevel, message string) {
+	_, _ = q.store.AddLog(ctx, LogInput{
+		TaskID:  id,
+		Level:   level,
+		Message: message,
+	})
 }

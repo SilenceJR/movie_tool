@@ -1,5 +1,7 @@
 package ai
 
+import "time"
+
 type ProviderType string
 
 const (
@@ -11,12 +13,15 @@ const (
 )
 
 type Provider struct {
-	ID           string
-	Name         string
-	Type         ProviderType
-	BaseURL      string
-	DefaultModel string
-	Enabled      bool
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	Type         ProviderType `json:"provider_type"`
+	BaseURL      string       `json:"base_url,omitempty"`
+	DefaultModel string       `json:"default_model,omitempty"`
+	Enabled      bool         `json:"enabled"`
+	HasAPIKey    bool         `json:"has_api_key"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 }
 
 type MatchSuggestion struct {

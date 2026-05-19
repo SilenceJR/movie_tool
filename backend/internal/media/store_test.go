@@ -48,3 +48,64 @@ func TestMemoryStoreUpsertFile(t *testing.T) {
 		t.Fatalf("expected updated size 24, got %d", updated.Size)
 	}
 }
+
+func TestMemoryStoreMarkMissingByLibrary(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)
+	store.now = func() time.Time {
+		return now
+	}
+
+	kept, err := store.UpsertFile(context.Background(), FileInput{
+		LibraryID: "library-1",
+		Path:      "/media/keep.mkv",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing, err := store.UpsertFile(context.Background(), FileInput{
+		LibraryID: "library-1",
+		Path:      "/media/missing.mkv",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := store.MarkMissingByLibrary(context.Background(), "library-1", []string{kept.Path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed != 1 {
+		t.Fatalf("expected 1 missing file, got %d", changed)
+	}
+
+	found, ok, err := store.GetFileByPath(context.Background(), missing.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected missing file")
+	}
+	if found.Status != FileStatusMissing {
+		t.Fatalf("expected missing status, got %s", found.Status)
+	}
+
+	missingFiles, err := store.ListFiles(context.Background(), FileQuery{
+		LibraryID: "library-1",
+		Status:    FileStatusMissing,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missingFiles) != 1 {
+		t.Fatalf("expected 1 missing file, got %d", len(missingFiles))
+	}
+
+	deleted, err := store.DeleteMissingByLibrary(context.Background(), "library-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected 1 deleted missing file, got %d", deleted)
+	}
+}

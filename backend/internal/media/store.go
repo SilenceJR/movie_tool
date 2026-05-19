@@ -12,7 +12,15 @@ import (
 type Store interface {
 	UpsertFile(context.Context, FileInput) (File, error)
 	ListFilesByLibrary(context.Context, string) ([]File, error)
+	ListFiles(context.Context, FileQuery) ([]File, error)
 	GetFileByPath(context.Context, string) (File, bool, error)
+	MarkMissingByLibrary(context.Context, string, []string) (int, error)
+	DeleteMissingByLibrary(context.Context, string) (int, error)
+}
+
+type FileQuery struct {
+	LibraryID string
+	Status    FileStatus
 }
 
 type FileInput struct {
@@ -98,14 +106,22 @@ func (s *MemoryStore) UpsertFile(_ context.Context, input FileInput) (File, erro
 }
 
 func (s *MemoryStore) ListFilesByLibrary(_ context.Context, libraryID string) ([]File, error) {
+	return s.ListFiles(context.Background(), FileQuery{LibraryID: libraryID})
+}
+
+func (s *MemoryStore) ListFiles(_ context.Context, query FileQuery) ([]File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	files := make([]File, 0)
 	for _, file := range s.files {
-		if file.LibraryID == libraryID {
-			files = append(files, file)
+		if query.LibraryID != "" && file.LibraryID != query.LibraryID {
+			continue
 		}
+		if query.Status != "" && file.Status != query.Status {
+			continue
+		}
+		files = append(files, file)
 	}
 	return files, nil
 }
@@ -116,6 +132,49 @@ func (s *MemoryStore) GetFileByPath(_ context.Context, path string) (File, bool,
 
 	file, ok := s.files[normalizePath(path)]
 	return file, ok, nil
+}
+
+func (s *MemoryStore) MarkMissingByLibrary(_ context.Context, libraryID string, availablePaths []string) (int, error) {
+	available := make(map[string]struct{}, len(availablePaths))
+	for _, path := range availablePaths {
+		available[normalizePath(path)] = struct{}{}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now().UTC()
+	changed := 0
+	for key, file := range s.files {
+		if file.LibraryID != libraryID {
+			continue
+		}
+		if _, ok := available[key]; ok {
+			continue
+		}
+		if file.Status == FileStatusMissing {
+			continue
+		}
+		file.Status = FileStatusMissing
+		file.UpdatedAt = now
+		s.files[key] = file
+		changed++
+	}
+	return changed, nil
+}
+
+func (s *MemoryStore) DeleteMissingByLibrary(_ context.Context, libraryID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	deleted := 0
+	for key, file := range s.files {
+		if file.LibraryID == libraryID && file.Status == FileStatusMissing {
+			delete(s.files, key)
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 func normalizePath(path string) string {

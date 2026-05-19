@@ -26,6 +26,14 @@ const (
 	StatusCanceled  Status = "canceled"
 )
 
+type LogLevel string
+
+const (
+	LogLevelInfo  LogLevel = "info"
+	LogLevelWarn  LogLevel = "warn"
+	LogLevelError LogLevel = "error"
+)
+
 type Task struct {
 	ID        string    `json:"id"`
 	Type      Type      `json:"type"`
@@ -35,4 +43,12 @@ type Task struct {
 	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type LogEntry struct {
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Level     LogLevel  `json:"level"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
 }

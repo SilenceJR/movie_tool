@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"movie-tool/backend/internal/ai"
@@ -30,21 +31,22 @@ import (
 )
 
 type Server struct {
-	cfg          config.Config
-	mux          *http.ServeMux
-	ai           ai.Store
-	automations  automation.Store
-	catalog      catalog.Store
-	downloads    download.Store
-	integrations integration.Store
-	libraries    library.Store
-	localization localization.Store
-	mediaFiles   media.Store
-	organizer    organizer.Store
-	scraper      scraper.Store
-	strm         strm.Store
-	tasks        *task.Queue
-	scanDB       transactionBeginner
+	cfg             config.Config
+	mux             *http.ServeMux
+	ai              ai.Store
+	automations     automation.Store
+	catalog         catalog.Store
+	downloads       download.Store
+	integrations    integration.Store
+	libraries       library.Store
+	localization    localization.Store
+	mediaFiles      media.Store
+	organizer       organizer.Store
+	scraper         scraper.Store
+	strm            strm.Store
+	tasks           *task.Queue
+	scanDB          transactionBeginner
+	downloadWatchMu sync.Mutex
 }
 
 type Dependencies struct {
@@ -899,6 +901,14 @@ func (s *Server) handleRunDownloadDirectoryWatch(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options downloadScanOptions) (downloadDirectoryWatchRun, error) {
+	if !s.downloadWatchMu.TryLock() {
+		return downloadDirectoryWatchRun{
+			Skipped:    true,
+			SkipReason: "download watch is already running",
+		}, nil
+	}
+	defer s.downloadWatchMu.Unlock()
+
 	directories, err := s.downloads.ListWatchEnabled(ctx)
 	if err != nil {
 		return downloadDirectoryWatchRun{}, err
@@ -957,6 +967,8 @@ type downloadDirectoryWatchRun struct {
 	Failed              []downloadDirectoryWatchFailure `json:"failed"`
 	Count               int                             `json:"count"`
 	FailureCount        int                             `json:"failure_count"`
+	Skipped             bool                            `json:"skipped,omitempty"`
+	SkipReason          string                          `json:"skip_reason,omitempty"`
 }
 
 type downloadDirectoryScanResult struct {

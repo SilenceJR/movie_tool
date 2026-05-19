@@ -1610,6 +1610,27 @@ func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T)
 	}
 }
 
+func TestRunDownloadDirectoryWatchSkipsWhenAlreadyRunning(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	server.downloadWatchMu.Lock()
+	defer server.downloadWatchMu.Unlock()
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 skipped watch run, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["skipped"] != true || body["skip_reason"] == "" {
+		t.Fatalf("expected skipped watch run response, got %#v", body)
+	}
+}
+
 func TestAutomationCRUDAndRun(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

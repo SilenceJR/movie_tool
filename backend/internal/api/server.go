@@ -156,6 +156,31 @@ func (s *Server) StartAutomationTicker(ctx context.Context, interval time.Durati
 	}()
 }
 
+func (s *Server) StartDownloadWatchTicker(ctx context.Context, interval time.Duration, minStableAge time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	if minStableAge < 0 {
+		minStableAge = 0
+	}
+	ticker := time.NewTicker(interval)
+	options := downloadScanOptions{
+		MinStableAge:    minStableAge,
+		ContinueOnError: true,
+	}
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_, _ = s.RunDownloadDirectoryWatch(ctx, options)
+			}
+		}
+	}()
+}
+
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
@@ -824,16 +849,24 @@ func (s *Server) handleRunDownloadDirectoryWatch(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	directories, err := s.downloads.ListWatchEnabled(r.Context())
+	result, err := s.RunDownloadDirectoryWatch(r.Context(), options)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	writeJSON(w, http.StatusAccepted, result)
+}
+
+func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options downloadScanOptions) (downloadDirectoryWatchRun, error) {
+	directories, err := s.downloads.ListWatchEnabled(ctx)
+	if err != nil {
+		return downloadDirectoryWatchRun{}, err
 	}
 
 	results := make([]downloadDirectoryScanResult, 0, len(directories))
 	failures := make([]downloadDirectoryWatchFailure, 0)
 	for _, directory := range directories {
-		result, status, err := s.scanDownloadDirectory(r.Context(), directory, options)
+		result, status, err := s.scanDownloadDirectory(ctx, directory, options)
 		if err != nil {
 			failures = append(failures, downloadDirectoryWatchFailure{
 				DownloadDirectory: directory,
@@ -844,13 +877,13 @@ func (s *Server) handleRunDownloadDirectoryWatch(w http.ResponseWriter, r *http.
 		}
 		results = append(results, result)
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"download_directories": directories,
-		"results":              results,
-		"failed":               failures,
-		"count":                len(results),
-		"failure_count":        len(failures),
-	})
+	return downloadDirectoryWatchRun{
+		DownloadDirectories: directories,
+		Results:             results,
+		Failed:              failures,
+		Count:               len(results),
+		FailureCount:        len(failures),
+	}, nil
 }
 
 type downloadScanOptions struct {
@@ -858,6 +891,14 @@ type downloadScanOptions struct {
 	BatchSize       int
 	ContinueOnError bool
 	OrganizerRuleID string
+}
+
+type downloadDirectoryWatchRun struct {
+	DownloadDirectories []download.Directory            `json:"download_directories"`
+	Results             []downloadDirectoryScanResult   `json:"results"`
+	Failed              []downloadDirectoryWatchFailure `json:"failed"`
+	Count               int                             `json:"count"`
+	FailureCount        int                             `json:"failure_count"`
 }
 
 type downloadDirectoryScanResult struct {

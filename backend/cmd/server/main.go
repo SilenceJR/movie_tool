@@ -47,6 +47,7 @@ func main() {
 		ScanDB:       db,
 	})
 	server.StartAutomationTicker(context.Background(), time.Minute)
+	server.StartDownloadWatchTicker(context.Background(), 5*time.Minute, 2*time.Minute)
 
 	log.Printf("movie-tool backend listening on %s", cfg.Addr())
 	if err := server.ListenAndServe(); err != nil {

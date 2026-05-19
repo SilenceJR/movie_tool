@@ -79,7 +79,8 @@ backend/internal/task         任务系统
 - 执行成功后会把对应 `media_files` 路径回写到目标媒体目录；显式计划里不存在于库内的文件会跳过路径回写但保留执行结果。
 - `POST /api/organizer/plan` 可显式传入 media/versions/files，也已支持 `rule_id + media_id` 或 `rule_id + library_id` 自动从 catalog/media_files 组装 dry-run，可按 `match_status`、`file_status`、`media_type` 过滤批量计划，把下载目录来源文件按规则预览为 hardlink/symlink/move/copy 到目标媒体库目录。
 - dry-run 会检测计划内重复目标和磁盘上已有目标；`skip` 会标记 skipped，`rename` 会预演重命名目标，`overwrite_with_confirmation` 会标记 conflict 等待确认。
-- 仍需补齐执行回滚/重试能力，以及更细的批量计划过滤条件。
+- 失败计划可通过 `POST /api/organizer/plans/{id}/retry` 重试失败动作；如果失败发生在媒体文件路径回写阶段，会只重试数据库路径回写，避免重复移动/复制已完成的文件操作。
+- 仍需补齐执行回滚能力，以及更细的批量计划过滤条件。
 
 ### scanner
 
@@ -103,6 +104,6 @@ backend/internal/task         任务系统
 1. 为下载目录接入真实 watcher，文件创建/完成且通过稳定性检测后自动触发扫描与匹配流程。
 2. 为下载目录监听增加事件去抖、失败重试和批量合并。
 3. 为扫描任务增加分批导入和单文件失败隔离，避免超大媒体库一次事务过长。
-4. 为 organizer 执行结果增加回滚/重试和更细的失败恢复。
+4. 为 organizer 执行结果增加回滚能力和更细的失败恢复。
 5. 为批量 organizer plan 增加按路径前缀、下载目录来源和目标目录冲突级别过滤。
 ```

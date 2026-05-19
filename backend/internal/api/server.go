@@ -2323,6 +2323,8 @@ func (s *Server) handleOrganizerPlanAction(w http.ResponseWriter, r *http.Reques
 	switch action {
 	case "execute":
 		s.handleExecuteOrganizerPlan(w, r, id)
+	case "retry":
+		s.handleRetryOrganizerPlan(w, r, id)
 	case "cancel":
 		s.handleCancelOrganizerPlan(w, r, id)
 	default:
@@ -2344,19 +2346,60 @@ func (s *Server) handleExecuteOrganizerPlan(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan cannot be executed from status %q", plan.Status))
 		return
 	}
-
-	taskRecord := s.tasks.Enqueue(task.TypeOrganizeFiles, "execute organizer plan: "+plan.ID)
-	taskRecord, _ = s.tasks.Start(taskRecord.ID)
-	executed := organizer.NewExecutor().Execute(r.Context(), plan)
-	saved, err := s.organizer.UpdatePlan(r.Context(), executed)
+	taskRecord, saved, err := s.executeOrganizerPlan(r.Context(), plan, "execute organizer plan: "+plan.ID)
 	if err != nil {
-		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task": taskRecord,
+		"plan": saved,
+	})
+}
+
+func (s *Server) handleRetryOrganizerPlan(w http.ResponseWriter, r *http.Request, id string) {
+	plan, ok, err := s.organizer.GetPlan(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	if plan.Status != organizer.PlanFailed {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan cannot be retried from status %q", plan.Status))
+		return
+	}
+	prepared, retryable := organizer.PrepareRetry(plan, time.Now().UTC())
+	if retryable == 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no failed actions to retry"))
+		return
+	}
+	taskRecord, saved, err := s.executeOrganizerPlan(r.Context(), prepared, "retry organizer plan: "+plan.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task":      taskRecord,
+		"plan":      saved,
+		"retryable": retryable,
+	})
+}
+
+func (s *Server) executeOrganizerPlan(ctx context.Context, plan organizer.Plan, message string) (task.Task, organizer.Plan, error) {
+	taskRecord := s.tasks.Enqueue(task.TypeOrganizeFiles, message)
+	taskRecord, _ = s.tasks.Start(taskRecord.ID)
+	executed := organizer.NewExecutor().Execute(ctx, plan)
+	saved, err := s.organizer.UpdatePlan(ctx, executed)
+	if err != nil {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+		return taskRecord, organizer.Plan{}, err
+	}
 	for index, action := range saved.Actions {
 		if action.Status == organizer.ActionSucceeded && action.MediaFileID != "" {
-			if _, ok, err := s.mediaFiles.UpdateFilePath(r.Context(), action.MediaFileID, action.TargetPath); err != nil {
+			if _, ok, err := s.mediaFiles.UpdateFilePath(ctx, action.MediaFileID, action.TargetPath); err != nil {
 				saved.Actions[index].Status = organizer.ActionFailed
 				saved.Actions[index].Error = "update media file path: " + err.Error()
 				saved.Status = organizer.PlanFailed
@@ -2368,11 +2411,10 @@ func (s *Server) handleExecuteOrganizerPlan(w http.ResponseWriter, r *http.Reque
 	if saved.Status == organizer.PlanFailed {
 		saved.Summary = organizer.SummarizeActions(saved.Actions)
 		var updateErr error
-		saved, updateErr = s.organizer.UpdatePlan(r.Context(), saved)
+		saved, updateErr = s.organizer.UpdatePlan(ctx, saved)
 		if updateErr != nil {
 			taskRecord, _ = s.tasks.Fail(taskRecord.ID, updateErr)
-			writeError(w, http.StatusInternalServerError, updateErr)
-			return
+			return taskRecord, organizer.Plan{}, updateErr
 		}
 	}
 	for _, action := range saved.Actions {
@@ -2381,12 +2423,9 @@ func (s *Server) handleExecuteOrganizerPlan(w http.ResponseWriter, r *http.Reque
 	if saved.Status == organizer.PlanFailed {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, fmt.Errorf("organizer plan failed"))
 	} else {
-		taskRecord, _ = s.tasks.Succeed(taskRecord.ID, "execute organizer plan: "+plan.ID)
+		taskRecord, _ = s.tasks.Succeed(taskRecord.ID, message)
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"task": taskRecord,
-		"plan": saved,
-	})
+	return taskRecord, saved, nil
 }
 
 func (s *Server) handleCancelOrganizerPlan(w http.ResponseWriter, r *http.Request, id string) {

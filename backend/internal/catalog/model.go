@@ -91,6 +91,16 @@ type Collection struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+type ExternalID struct {
+	ID         string    `json:"id"`
+	EntityType string    `json:"entity_type"`
+	EntityID   string    `json:"entity_id"`
+	Provider   string    `json:"provider"`
+	ExternalID string    `json:"external_id"`
+	URL        string    `json:"url,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type PersonInput struct {
 	Name          string `json:"name"`
 	OriginalName  string `json:"original_name"`
@@ -134,4 +144,12 @@ type CollectionItemInput struct {
 	MediaID      string `json:"media_id"`
 	SortOrder    int    `json:"sort_order"`
 	RelationType string `json:"relation_type"`
+}
+
+type ExternalIDInput struct {
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	Provider   string `json:"provider"`
+	ExternalID string `json:"external_id"`
+	URL        string `json:"url"`
 }

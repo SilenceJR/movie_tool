@@ -106,3 +106,36 @@ func TestMemoryStorePeopleTagsCollections(t *testing.T) {
 		t.Fatalf("expected linked item, got %+v", items)
 	}
 }
+
+func TestMemoryStoreExternalIDsUpsertByProvider(t *testing.T) {
+	store := NewMemoryStore()
+	first, err := store.UpsertExternalID(context.Background(), ExternalIDInput{
+		EntityType: "media",
+		EntityID:   "media-1",
+		Provider:   "tmdb",
+		ExternalID: "27205",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.UpsertExternalID(context.Background(), ExternalIDInput{
+		EntityType: "media",
+		EntityID:   "media-1",
+		Provider:   "tmdb",
+		ExternalID: "27206",
+		URL:        "https://example.test/title/27206",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID || !first.CreatedAt.Equal(second.CreatedAt) {
+		t.Fatalf("expected provider upsert to keep identity, first=%+v second=%+v", first, second)
+	}
+	externalIDs, err := store.ListExternalIDs(context.Background(), "media", "media-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(externalIDs) != 1 || externalIDs[0].ExternalID != "27206" || externalIDs[0].URL == "" {
+		t.Fatalf("expected updated external id, got %+v", externalIDs)
+	}
+}

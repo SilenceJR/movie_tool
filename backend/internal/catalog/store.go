@@ -29,6 +29,8 @@ type Store interface {
 	GetCollection(context.Context, string) (Collection, bool, error)
 	ListCollections(context.Context) ([]Collection, error)
 	AddCollectionItem(context.Context, string, CollectionItemInput) error
+	UpsertExternalID(context.Context, ExternalIDInput) (ExternalID, error)
+	ListExternalIDs(context.Context, string, string) ([]ExternalID, error)
 }
 
 type ItemQuery struct {
@@ -99,6 +101,7 @@ type MemoryStore struct {
 	mediaPeople     map[string]map[string]bool
 	mediaTags       map[string]map[string]bool
 	collectionItems map[string]map[string]bool
+	externalIDs     map[string]ExternalID
 	now             func() time.Time
 }
 
@@ -112,6 +115,7 @@ func NewMemoryStore() *MemoryStore {
 		mediaPeople:     make(map[string]map[string]bool),
 		mediaTags:       make(map[string]map[string]bool),
 		collectionItems: make(map[string]map[string]bool),
+		externalIDs:     make(map[string]ExternalID),
 		now:             time.Now,
 	}
 }
@@ -387,6 +391,42 @@ func (s *MemoryStore) AddCollectionItem(_ context.Context, collectionID string, 
 	return nil
 }
 
+func (s *MemoryStore) UpsertExternalID(_ context.Context, input ExternalIDInput) (ExternalID, error) {
+	externalID, err := externalIDFromInput(input, s.now().UTC())
+	if err != nil {
+		return ExternalID{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := externalIDKey(input.EntityType, input.EntityID, input.Provider)
+	if existing, ok := s.externalIDs[key]; ok {
+		externalID.ID = existing.ID
+		externalID.CreatedAt = existing.CreatedAt
+	} else {
+		externalID.ID = fmt.Sprintf("external_id_%d", externalID.CreatedAt.UnixNano())
+	}
+	s.externalIDs[key] = externalID
+	return externalID, nil
+}
+
+func (s *MemoryStore) ListExternalIDs(_ context.Context, entityType, entityID string) ([]ExternalID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	externalIDs := make([]ExternalID, 0)
+	for _, externalID := range s.externalIDs {
+		if externalID.EntityType == entityType && externalID.EntityID == entityID {
+			externalIDs = append(externalIDs, externalID)
+		}
+	}
+	sort.Slice(externalIDs, func(i, j int) bool {
+		if externalIDs[i].Provider == externalIDs[j].Provider {
+			return externalIDs[i].ExternalID < externalIDs[j].ExternalID
+		}
+		return externalIDs[i].Provider < externalIDs[j].Provider
+	})
+	return externalIDs, nil
+}
+
 func itemFromInput(input ItemInput, now time.Time) (Item, error) {
 	if input.LibraryID == "" {
 		return Item{}, fmt.Errorf("library id is required")
@@ -421,6 +461,27 @@ func itemFromInput(input ItemInput, now time.Time) (Item, error) {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}, nil
+}
+
+func externalIDFromInput(input ExternalIDInput, now time.Time) (ExternalID, error) {
+	if input.EntityType == "" || input.EntityID == "" {
+		return ExternalID{}, fmt.Errorf("entity type and entity id are required")
+	}
+	if input.Provider == "" || input.ExternalID == "" {
+		return ExternalID{}, fmt.Errorf("provider and external id are required")
+	}
+	return ExternalID{
+		EntityType: input.EntityType,
+		EntityID:   input.EntityID,
+		Provider:   input.Provider,
+		ExternalID: input.ExternalID,
+		URL:        input.URL,
+		CreatedAt:  now,
+	}, nil
+}
+
+func externalIDKey(entityType, entityID, provider string) string {
+	return entityType + "\x00" + entityID + "\x00" + provider
 }
 
 func applyItemUpdate(item *Item, input ItemUpdate) {

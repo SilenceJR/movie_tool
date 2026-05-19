@@ -381,6 +381,67 @@ VALUES (?, ?, ?, ?, ?)`,
 	return err
 }
 
+func (s *SQLStore) UpsertExternalID(ctx context.Context, input ExternalIDInput) (ExternalID, error) {
+	externalID, err := externalIDFromInput(input, s.now().UTC())
+	if err != nil {
+		return ExternalID{}, err
+	}
+	externalID.ID = newID("external_id")
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO external_ids (id, entity_type, entity_id, provider, external_id, url, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(entity_type, entity_id, provider) DO UPDATE SET
+  external_id = excluded.external_id,
+  url = excluded.url`,
+		externalID.ID, externalID.EntityType, externalID.EntityID, externalID.Provider, externalID.ExternalID, nullString(externalID.URL), formatTime(externalID.CreatedAt))
+	if err != nil {
+		return ExternalID{}, err
+	}
+	stored, ok, err := s.getExternalID(ctx, input.EntityType, input.EntityID, input.Provider)
+	if err != nil {
+		return ExternalID{}, err
+	}
+	if !ok {
+		return ExternalID{}, fmt.Errorf("external id was not stored")
+	}
+	return stored, nil
+}
+
+func (s *SQLStore) ListExternalIDs(ctx context.Context, entityType, entityID string) ([]ExternalID, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, entity_type, entity_id, provider, external_id, url, created_at
+FROM external_ids
+WHERE entity_type = ? AND entity_id = ?
+ORDER BY provider ASC, external_id ASC`, entityType, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var externalIDs []ExternalID
+	for rows.Next() {
+		externalID, err := scanExternalID(rows)
+		if err != nil {
+			return nil, err
+		}
+		externalIDs = append(externalIDs, externalID)
+	}
+	return externalIDs, rows.Err()
+}
+
+func (s *SQLStore) getExternalID(ctx context.Context, entityType, entityID, provider string) (ExternalID, bool, error) {
+	externalID, err := scanExternalID(s.db.QueryRowContext(ctx, `
+SELECT id, entity_type, entity_id, provider, external_id, url, created_at
+FROM external_ids
+WHERE entity_type = ? AND entity_id = ? AND provider = ?`, entityType, entityID, provider))
+	if err == sql.ErrNoRows {
+		return ExternalID{}, false, nil
+	}
+	if err != nil {
+		return ExternalID{}, false, err
+	}
+	return externalID, true, nil
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -555,6 +616,18 @@ func scanCollection(scanner scanner) (Collection, error) {
 	collection.CreatedAt = parseTime(createdAt)
 	collection.UpdatedAt = parseTime(updatedAt)
 	return collection, nil
+}
+
+func scanExternalID(scanner scanner) (ExternalID, error) {
+	var externalID ExternalID
+	var url sql.NullString
+	var createdAt string
+	if err := scanner.Scan(&externalID.ID, &externalID.EntityType, &externalID.EntityID, &externalID.Provider, &externalID.ExternalID, &url, &createdAt); err != nil {
+		return ExternalID{}, err
+	}
+	externalID.URL = url.String
+	externalID.CreatedAt = parseTime(createdAt)
+	return externalID, nil
 }
 
 func newID(prefix string) string {

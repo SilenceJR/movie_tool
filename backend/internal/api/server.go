@@ -1664,6 +1664,16 @@ func (s *Server) applyScrapeDecision(ctx context.Context, input scraper.Decision
 	if !ok {
 		return map[string]any{"status": "skipped", "reason": "media item not found"}, nil
 	}
+	if candidate.Provider != "" && candidate.ExternalID != "" {
+		if _, err := s.catalog.UpsertExternalID(ctx, catalog.ExternalIDInput{
+			EntityType: "media",
+			EntityID:   input.MediaID,
+			Provider:   candidate.Provider,
+			ExternalID: candidate.ExternalID,
+		}); err != nil {
+			return nil, err
+		}
+	}
 	if candidate.Title != "" {
 		if _, err := s.localization.UpsertMetadata(ctx, localization.MetadataInput{
 			MediaID:   input.MediaID,

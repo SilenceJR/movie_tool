@@ -1617,6 +1617,13 @@ func TestScrapeDecisionAppliesCandidateMetadata(t *testing.T) {
 	if mediaItem["title"] != "盗梦空间" || mediaItem["match_status"] != "matched" || mediaItem["locked"] != true {
 		t.Fatalf("expected applied catalog metadata, got %#v", mediaItem)
 	}
+	externalIDs, err := server.catalog.ListExternalIDs(context.Background(), "media", mediaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(externalIDs) != 1 || externalIDs[0].Provider != "tmdb" || externalIDs[0].ExternalID != "27205" {
+		t.Fatalf("expected selected candidate external id, got %#v", externalIDs)
+	}
 
 	assertTranslationList(t, server, "/api/media/"+mediaID+"/translations?language=zh-CN", "盗梦空间")
 }

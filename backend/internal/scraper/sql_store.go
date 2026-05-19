@@ -13,6 +13,7 @@ import (
 type SQLDB interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 type SQLStore struct {
@@ -78,6 +79,21 @@ INSERT INTO scrape_candidates (
 		return StoredCandidate{}, err
 	}
 	return candidate, nil
+}
+
+func (s *SQLStore) GetCandidate(ctx context.Context, id string) (StoredCandidate, bool, error) {
+	candidate, err := scanCandidate(s.db.QueryRowContext(ctx, `
+SELECT id, media_file_id, media_id, provider, external_id, title, original_title, year,
+       poster_url, overview, score, score_reasons, raw_payload, created_at
+FROM scrape_candidates
+WHERE id = ?`, id))
+	if err == sql.ErrNoRows {
+		return StoredCandidate{}, false, nil
+	}
+	if err != nil {
+		return StoredCandidate{}, false, err
+	}
+	return candidate, true, nil
 }
 
 func (s *SQLStore) ListCandidates(ctx context.Context, query CandidateQuery) ([]StoredCandidate, error) {

@@ -48,6 +48,8 @@ func (s *SQLStore) UpsertFile(ctx context.Context, input FileInput) (File, error
 	}
 
 	file.LibraryID = input.LibraryID
+	file.MediaID = input.MediaID
+	file.VersionID = input.VersionID
 	file.Path = input.Path
 	file.FileName = input.FileName
 	file.Extension = strings.ToLower(input.Extension)
@@ -67,10 +69,12 @@ func (s *SQLStore) UpsertFile(ctx context.Context, input FileInput) (File, error
 	if ok {
 		_, err = s.db.ExecContext(ctx, `
 UPDATE media_files
-SET library_id = ?, path = ?, file_name = ?, extension = ?, size = ?, modified_at = ?, file_status = ?,
+SET media_id = ?, version_id = ?, library_id = ?, path = ?, file_name = ?, extension = ?, size = ?, modified_at = ?, file_status = ?,
     is_strm = ?, strm_target = ?, detected_media_type = ?, parsed_title = ?, parsed_year = ?,
     parsed_season = ?, parsed_episode = ?, parsed_number = ?, updated_at = ?
 WHERE normalized_path = ?`,
+			nullableString(file.MediaID),
+			nullableString(file.VersionID),
 			file.LibraryID,
 			file.Path,
 			file.FileName,
@@ -92,11 +96,13 @@ WHERE normalized_path = ?`,
 	} else {
 		_, err = s.db.ExecContext(ctx, `
 INSERT INTO media_files (
-  id, library_id, path, normalized_path, file_name, extension, size, modified_at, file_status,
+  id, media_id, version_id, library_id, path, normalized_path, file_name, extension, size, modified_at, file_status,
   is_strm, strm_target, detected_media_type, parsed_title, parsed_year, parsed_season,
   parsed_episode, parsed_number, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			file.ID,
+			nullableString(file.MediaID),
+			nullableString(file.VersionID),
 			file.LibraryID,
 			file.Path,
 			file.NormalizedPath,
@@ -320,6 +326,13 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func formatTime(value time.Time) string {

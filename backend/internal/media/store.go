@@ -24,6 +24,8 @@ type FileQuery struct {
 }
 
 type FileInput struct {
+	MediaID           string
+	VersionID         string
 	LibraryID         string
 	Path              string
 	FileName          string
@@ -85,6 +87,8 @@ func (s *MemoryStore) UpsertFile(_ context.Context, input FileInput) (File, erro
 	}
 
 	file.LibraryID = input.LibraryID
+	file.MediaID = input.MediaID
+	file.VersionID = input.VersionID
 	file.Path = input.Path
 	file.FileName = input.FileName
 	file.Extension = strings.ToLower(input.Extension)

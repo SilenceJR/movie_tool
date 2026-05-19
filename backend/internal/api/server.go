@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,12 +11,15 @@ import (
 	"movie-tool/backend/internal/automation"
 	"movie-tool/backend/internal/catalog"
 	"movie-tool/backend/internal/config"
+	"movie-tool/backend/internal/integration"
 	"movie-tool/backend/internal/library"
 	"movie-tool/backend/internal/localization"
 	"movie-tool/backend/internal/media"
+	"movie-tool/backend/internal/nfo"
 	"movie-tool/backend/internal/organizer"
 	"movie-tool/backend/internal/scanner"
 	"movie-tool/backend/internal/scraper"
+	"movie-tool/backend/internal/strm"
 	"movie-tool/backend/internal/task"
 )
 
@@ -25,11 +29,13 @@ type Server struct {
 	ai           ai.Store
 	automations  automation.Store
 	catalog      catalog.Store
+	integrations integration.Store
 	libraries    library.Store
 	localization localization.Store
 	mediaFiles   media.Store
 	organizer    organizer.Store
 	scraper      scraper.Store
+	strm         strm.Store
 	tasks        *task.Queue
 }
 
@@ -37,11 +43,13 @@ type Dependencies struct {
 	AI           ai.Store
 	Automations  automation.Store
 	Catalog      catalog.Store
+	Integrations integration.Store
 	Libraries    library.Store
 	Localization localization.Store
 	MediaFiles   media.Store
 	Organizer    organizer.Store
 	Scraper      scraper.Store
+	STRM         strm.Store
 	Tasks        *task.Queue
 }
 
@@ -59,6 +67,9 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 	if deps.Catalog == nil {
 		deps.Catalog = catalog.NewMemoryStore()
 	}
+	if deps.Integrations == nil {
+		deps.Integrations = integration.NewMemoryStore()
+	}
 	if deps.Libraries == nil {
 		deps.Libraries = library.NewMemoryStore()
 	}
@@ -74,6 +85,9 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 	if deps.Scraper == nil {
 		deps.Scraper = scraper.NewMemoryStore()
 	}
+	if deps.STRM == nil {
+		deps.STRM = strm.NewMemoryStore()
+	}
 	if deps.Tasks == nil {
 		deps.Tasks = task.NewQueue()
 	}
@@ -84,11 +98,13 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 		ai:           deps.AI,
 		automations:  deps.Automations,
 		catalog:      deps.Catalog,
+		integrations: deps.Integrations,
 		libraries:    deps.Libraries,
 		localization: deps.Localization,
 		mediaFiles:   deps.MediaFiles,
 		organizer:    deps.Organizer,
 		scraper:      deps.Scraper,
+		strm:         deps.STRM,
 		tasks:        deps.Tasks,
 	}
 	server.routes()
@@ -106,6 +122,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
+	s.mux.HandleFunc("GET /api/integrations", s.handleListIntegrations)
+	s.mux.HandleFunc("POST /api/integrations", s.handleCreateIntegration)
+	s.mux.HandleFunc("GET /api/integrations/", s.handleGetIntegration)
+	s.mux.HandleFunc("PATCH /api/integrations/", s.handleUpdateIntegration)
+	s.mux.HandleFunc("DELETE /api/integrations/", s.handleDeleteIntegration)
+	s.mux.HandleFunc("POST /api/integrations/", s.handleIntegrationAction)
 	s.mux.HandleFunc("GET /api/ai/providers", s.handleListAIProviders)
 	s.mux.HandleFunc("POST /api/ai/providers", s.handleCreateAIProvider)
 	s.mux.HandleFunc("GET /api/ai/providers/", s.handleGetAIProvider)
@@ -140,9 +162,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/scrape-candidates", s.handleCreateScrapeCandidate)
 	s.mux.HandleFunc("GET /api/scrape-decisions", s.handleListScrapeDecisions)
 	s.mux.HandleFunc("POST /api/scrape-decisions", s.handleCreateScrapeDecision)
+	s.mux.HandleFunc("GET /api/strm/rules", s.handleListSTRMRules)
+	s.mux.HandleFunc("POST /api/strm/rules", s.handleCreateSTRMRule)
+	s.mux.HandleFunc("GET /api/strm/rules/", s.handleGetSTRMRule)
+	s.mux.HandleFunc("PATCH /api/strm/rules/", s.handleUpdateSTRMRule)
+	s.mux.HandleFunc("DELETE /api/strm/rules/", s.handleDeleteSTRMRule)
+	s.mux.HandleFunc("POST /api/nfo/generate", s.handleGenerateNFO)
+	s.mux.HandleFunc("POST /api/strm/generate", s.handleGenerateSTRM)
+	s.mux.HandleFunc("POST /api/strm/validate", s.handleValidateSTRM)
 	s.mux.HandleFunc("GET /api/tasks", s.handleListTasks)
 	s.mux.HandleFunc("GET /api/tasks/", s.handleGetTask)
 	s.mux.HandleFunc("POST /api/tasks/", s.handleTaskAction)
+	s.mux.HandleFunc("GET /api/organizer/rules", s.handleListOrganizerRules)
+	s.mux.HandleFunc("POST /api/organizer/rules", s.handleCreateOrganizerRule)
+	s.mux.HandleFunc("GET /api/organizer/rules/", s.handleGetOrganizerRule)
+	s.mux.HandleFunc("PATCH /api/organizer/rules/", s.handleUpdateOrganizerRule)
+	s.mux.HandleFunc("DELETE /api/organizer/rules/", s.handleDeleteOrganizerRule)
 	s.mux.HandleFunc("POST /api/organizer/plan", s.handleCreateOrganizerPlan)
 	s.mux.HandleFunc("GET /api/organizer/plans/", s.handleGetOrganizerPlan)
 	s.mux.HandleFunc("GET /api/organizer/actions", s.handleListOrganizerActions)
@@ -169,6 +204,129 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 		"cache_dir": s.cfg.CacheDir,
 		"database":  s.cfg.Database,
 	})
+}
+
+func (s *Server) handleListIntegrations(w http.ResponseWriter, r *http.Request) {
+	servers, err := s.integrations.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, servers)
+}
+
+func (s *Server) handleCreateIntegration(w http.ResponseWriter, r *http.Request) {
+	var input integration.ServerInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	server, err := s.integrations.Create(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, server)
+}
+
+func (s *Server) handleGetIntegration(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/integrations/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	server, ok, err := s.integrations.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("integration not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, server)
+}
+
+func (s *Server) handleUpdateIntegration(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/integrations/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var input integration.ServerUpdate
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	server, ok, err := s.integrations.Update(r.Context(), id, input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("integration not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, server)
+}
+
+func (s *Server) handleDeleteIntegration(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/integrations/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	ok, err := s.integrations.Delete(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("integration not found"))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleIntegrationAction(w http.ResponseWriter, r *http.Request) {
+	id, action, err := pathIDAction(r.URL.Path, "/api/integrations/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	server, ok, err := s.integrations.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("integration not found"))
+		return
+	}
+	switch action {
+	case "test":
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":      "configured",
+			"server_id":   server.ID,
+			"server_type": server.Type,
+			"base_url":    server.BaseURL,
+			"has_api_key": server.HasAPIKey,
+		})
+	case "refresh":
+		var input integration.RefreshInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		plan := integration.BuildRefreshPlan(server, input)
+		taskRecord := s.tasks.Enqueue(task.TypeRefreshServer, "refresh server: "+server.Name)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"task": taskRecord,
+			"plan": plan,
+		})
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported integration action %q", action))
+	}
 }
 
 func (s *Server) handleListAIProviders(w http.ResponseWriter, r *http.Request) {
@@ -426,7 +584,14 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 	imported := make([]media.File, 0, len(files))
 	availablePaths := make([]string, 0, len(files))
 	for _, file := range files {
+		mediaID, versionID, err := s.ensureCatalogVersionForParsedFile(r.Context(), file)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
 		stored, err := s.mediaFiles.UpsertFile(r.Context(), media.FileInput{
+			MediaID:           mediaID,
+			VersionID:         versionID,
 			LibraryID:         file.LibraryID,
 			Path:              file.Path,
 			FileName:          file.FileName,
@@ -462,6 +627,115 @@ func (s *Server) handleScanLibrary(w http.ResponseWriter, r *http.Request, id st
 		"count":         len(files),
 		"missing_count": missingCount,
 	})
+}
+
+func (s *Server) ensureCatalogVersionForParsedFile(ctx context.Context, file scanner.ParsedFile) (string, string, error) {
+	existingFile, ok, err := s.mediaFiles.GetFileByPath(ctx, file.Path)
+	if err != nil {
+		return "", "", err
+	}
+	if ok && existingFile.MediaID != "" && existingFile.VersionID != "" {
+		return existingFile.MediaID, existingFile.VersionID, nil
+	}
+
+	mediaID := existingFile.MediaID
+	if mediaID == "" {
+		items, err := s.catalog.ListItems(ctx, catalog.ItemQuery{
+			LibraryID: file.LibraryID,
+			MediaType: file.MediaType,
+			Title:     firstNonEmpty(file.Title, file.Number),
+			Year:      file.Year,
+		})
+		if err != nil {
+			return "", "", err
+		}
+		if len(items) > 0 {
+			mediaID = items[0].ID
+		} else {
+			item, err := s.catalog.CreateItem(ctx, catalog.ItemInput{
+				LibraryID:    file.LibraryID,
+				MediaType:    file.MediaType,
+				Title:        firstNonEmpty(file.Title, file.Number),
+				DisplayTitle: firstNonEmpty(file.Title, file.Number),
+				Year:         file.Year,
+				DisplayLang:  "zh-CN",
+				Status:       "pending",
+				MatchStatus:  catalog.MatchStatusUnmatched,
+			})
+			if err != nil {
+				return "", "", err
+			}
+			mediaID = item.ID
+		}
+	}
+
+	versionID := existingFile.VersionID
+	if versionID == "" {
+		versions, err := s.catalog.ListVersions(ctx, mediaID)
+		if err != nil {
+			return "", "", err
+		}
+		version, err := s.catalog.CreateVersion(ctx, mediaID, catalog.VersionInput{
+			Name:          versionName(file),
+			Resolution:    file.Resolution,
+			Source:        file.Source,
+			VideoCodec:    file.VideoCodec,
+			AudioCodec:    file.AudioCodec,
+			HDRFormat:     file.HDRFormat,
+			ReleaseGroup:  file.ReleaseGroup,
+			SubtitleFlags: strings.Join(file.Subtitles, ","),
+			QualityScore:  versionQualityScore(file),
+			IsDefault:     len(versions) == 0,
+		})
+		if err != nil {
+			return "", "", err
+		}
+		versionID = version.ID
+	}
+
+	return mediaID, versionID, nil
+}
+
+func versionName(file scanner.ParsedFile) string {
+	parts := []string{file.Resolution, file.Source, file.VideoCodec, file.HDRFormat}
+	var cleaned []string
+	for _, part := range parts {
+		if part != "" {
+			cleaned = append(cleaned, part)
+		}
+	}
+	if len(cleaned) == 0 {
+		return "Default"
+	}
+	return strings.Join(cleaned, " ")
+}
+
+func versionQualityScore(file scanner.ParsedFile) int {
+	score := 0
+	switch file.Resolution {
+	case "4320p":
+		score += 50
+	case "2160p":
+		score += 40
+	case "1080p":
+		score += 30
+	case "720p":
+		score += 20
+	default:
+		score += 10
+	}
+	switch file.Source {
+	case "remux":
+		score += 30
+	case "bluray":
+		score += 25
+	case "web-dl":
+		score += 15
+	}
+	if file.HDRFormat != "" && file.HDRFormat != "sdr" {
+		score += 5
+	}
+	return score
 }
 
 func (s *Server) handleListMediaFiles(w http.ResponseWriter, r *http.Request) {
@@ -600,6 +874,12 @@ func (s *Server) handleMediaAction(w http.ResponseWriter, r *http.Request) {
 		s.handleAddMediaTag(w, r, parts[0])
 	case len(parts) == 2 && parts[1] == "translate":
 		s.handleTranslateMedia(w, r, parts[0])
+	case len(parts) == 2 && parts[1] == "lock":
+		s.handleSetMediaLock(w, r, parts[0], true)
+	case len(parts) == 2 && parts[1] == "unlock":
+		s.handleSetMediaLock(w, r, parts[0], false)
+	case len(parts) == 2 && parts[1] == "rescrape":
+		s.handleRescrapeMedia(w, r, parts[0])
 	default:
 		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported media action"))
 	}
@@ -658,6 +938,44 @@ func (s *Server) handleSetDefaultMediaVersion(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, version)
+}
+
+func (s *Server) handleSetMediaLock(w http.ResponseWriter, r *http.Request, mediaID string, locked bool) {
+	matchStatus := catalog.MatchStatusMatched
+	if locked {
+		matchStatus = catalog.MatchStatusLocked
+	}
+	item, ok, err := s.catalog.UpdateItem(r.Context(), mediaID, catalog.ItemUpdate{
+		Locked:      &locked,
+		MatchStatus: &matchStatus,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("media item not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) handleRescrapeMedia(w http.ResponseWriter, r *http.Request, mediaID string) {
+	item, ok, err := s.catalog.GetItem(r.Context(), mediaID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("media item not found"))
+		return
+	}
+	taskRecord := s.tasks.Enqueue(task.TypeScrapeMedia, "rescrape media: "+firstNonEmpty(item.DisplayTitle, item.Title, item.ID))
+	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "media queued for rescrape: "+item.ID)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task":     taskRecord,
+		"media_id": item.ID,
+	})
 }
 
 func (s *Server) handleListMediaTranslations(w http.ResponseWriter, r *http.Request) {
@@ -979,7 +1297,293 @@ func (s *Server) handleCreateScrapeDecision(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	applied, err := s.applyScrapeDecision(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"decision": created,
+		"applied":  applied,
+	})
+}
+
+func (s *Server) applyScrapeDecision(ctx context.Context, input scraper.DecisionInput) (map[string]any, error) {
+	if input.Decision != "" && input.Decision != scraper.DecisionSelect {
+		return map[string]any{"status": "skipped", "reason": "decision is not select"}, nil
+	}
+	if input.CandidateID == "" {
+		return map[string]any{"status": "skipped", "reason": "candidate_id is empty"}, nil
+	}
+	candidate, ok, err := s.scraper.GetCandidate(ctx, input.CandidateID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return map[string]any{"status": "skipped", "reason": "candidate not found"}, nil
+	}
+
+	title := candidate.Title
+	originalTitle := candidate.OriginalTitle
+	year := candidate.Year
+	overview := candidate.Overview
+	matchStatus := catalog.MatchStatusMatched
+	locked := input.Locked
+	update := catalog.ItemUpdate{
+		Title:         &title,
+		OriginalTitle: &originalTitle,
+		DisplayTitle:  &title,
+		Year:          &year,
+		Overview:      &overview,
+		MatchStatus:   &matchStatus,
+		Locked:        &locked,
+	}
+	item, ok, err := s.catalog.UpdateItem(ctx, input.MediaID, update)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return map[string]any{"status": "skipped", "reason": "media item not found"}, nil
+	}
+	if candidate.Title != "" {
+		if _, err := s.localization.UpsertMetadata(ctx, localization.MetadataInput{
+			MediaID:   input.MediaID,
+			Language:  item.DisplayLang,
+			FieldName: "title",
+			Value:     candidate.Title,
+			Source:    "scraper",
+			Provider:  candidate.Provider,
+			Locked:    input.Locked,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if candidate.Overview != "" {
+		if _, err := s.localization.UpsertMetadata(ctx, localization.MetadataInput{
+			MediaID:   input.MediaID,
+			Language:  item.DisplayLang,
+			FieldName: "overview",
+			Value:     candidate.Overview,
+			Source:    "scraper",
+			Provider:  candidate.Provider,
+			Locked:    input.Locked,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{
+		"status":       "applied",
+		"media_id":     input.MediaID,
+		"candidate_id": input.CandidateID,
+		"provider":     candidate.Provider,
+		"external_id":  candidate.ExternalID,
+	}, nil
+}
+
+func (s *Server) handleListSTRMRules(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.strm.ListRules(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rules)
+}
+
+func (s *Server) handleCreateSTRMRule(w http.ResponseWriter, r *http.Request) {
+	var input strm.RuleInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rule, err := s.strm.CreateRule(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, rule)
+}
+
+func (s *Server) handleGetSTRMRule(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/strm/rules/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rule, ok, err := s.strm.GetRule(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("strm rule not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, rule)
+}
+
+func (s *Server) handleUpdateSTRMRule(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/strm/rules/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var input strm.RuleUpdate
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rule, ok, err := s.strm.UpdateRule(r.Context(), id, input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("strm rule not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, rule)
+}
+
+func (s *Server) handleDeleteSTRMRule(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/strm/rules/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	ok, err := s.strm.DeleteRule(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("strm rule not found"))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleGenerateNFO(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		MediaID   string              `json:"media_id"`
+		Media     nfo.MediaInfo       `json:"media"`
+		Metadata  []nfo.MetadataField `json:"metadata"`
+		Language  string              `json:"language"`
+		FileName  string              `json:"file_name"`
+		OutputDir string              `json:"output_dir"`
+		DryRun    bool                `json:"dry_run"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if input.MediaID != "" {
+		item, ok, err := s.catalog.GetItem(r.Context(), input.MediaID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("media item not found"))
+			return
+		}
+		input.Media = nfo.MediaInfo{
+			ID:            item.ID,
+			MediaType:     item.MediaType,
+			Title:         item.Title,
+			OriginalTitle: item.OriginalTitle,
+			DisplayTitle:  item.DisplayTitle,
+			Year:          item.Year,
+			Overview:      item.Overview,
+			Runtime:       item.Runtime,
+			ReleaseDate:   item.ReleaseDate,
+		}
+		if input.Language == "" {
+			input.Language = item.DisplayLang
+		}
+		fields, err := s.localization.ListMetadata(r.Context(), localization.MetadataQuery{MediaID: input.MediaID, Language: input.Language})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		input.Metadata = make([]nfo.MetadataField, 0, len(fields))
+		for _, field := range fields {
+			input.Metadata = append(input.Metadata, nfo.MetadataField{
+				Language:  field.Language,
+				FieldName: field.FieldName,
+				Value:     field.Value,
+			})
+		}
+	}
+	plan, err := nfo.NewGenerator().Generate(nfo.GenerateRequest{
+		Media:     input.Media,
+		Metadata:  input.Metadata,
+		Language:  input.Language,
+		FileName:  input.FileName,
+		OutputDir: input.OutputDir,
+		DryRun:    input.DryRun,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	taskRecord := s.tasks.Enqueue(task.TypeGenerateNFO, "generate nfo: "+firstNonEmpty(input.Media.DisplayTitle, input.Media.Title, input.Media.ID))
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task": taskRecord,
+		"plan": plan,
+	})
+}
+
+func (s *Server) handleGenerateSTRM(w http.ResponseWriter, r *http.Request) {
+	var input strm.GenerateRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rule, ok, err := s.strm.GetRule(r.Context(), input.RuleID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("strm rule not found"))
+		return
+	}
+	if input.LibraryID != "" && len(input.Files) == 0 {
+		files, err := s.mediaFiles.ListFiles(r.Context(), media.FileQuery{LibraryID: input.LibraryID, Status: media.FileStatusAvailable})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		input.Files = make([]strm.FileInfo, 0, len(files))
+		for _, file := range files {
+			input.Files = append(input.Files, strm.FileInfo{
+				ID:        file.ID,
+				LibraryID: file.LibraryID,
+				Path:      file.Path,
+				FileName:  file.FileName,
+				Status:    string(file.Status),
+			})
+		}
+	}
+	plan, err := strm.NewPlanner().Build(rule, input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	taskRecord := s.tasks.Enqueue(task.TypeGenerateSTRM, "generate strm: "+rule.Name)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task": taskRecord,
+		"plan": plan,
+	})
+}
+
+func (s *Server) handleValidateSTRM(w http.ResponseWriter, r *http.Request) {
+	var input strm.ValidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, strm.NewPlanner().Validate(input.Rule, input.Path))
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
@@ -1052,11 +1656,105 @@ func (s *Server) handleTaskAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleListOrganizerRules(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.organizer.ListRules(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rules)
+}
+
+func (s *Server) handleCreateOrganizerRule(w http.ResponseWriter, r *http.Request) {
+	var input organizer.RuleInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rule, err := s.organizer.CreateRule(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, rule)
+}
+
+func (s *Server) handleGetOrganizerRule(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/organizer/rules/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rule, ok, err := s.organizer.GetRule(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer rule not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, rule)
+}
+
+func (s *Server) handleUpdateOrganizerRule(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/organizer/rules/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var input organizer.RuleUpdate
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	rule, ok, err := s.organizer.UpdateRule(r.Context(), id, input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer rule not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, rule)
+}
+
+func (s *Server) handleDeleteOrganizerRule(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r.URL.Path, "/api/organizer/rules/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	ok, err := s.organizer.DeleteRule(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer rule not found"))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleCreateOrganizerPlan(w http.ResponseWriter, r *http.Request) {
 	var input organizer.PlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
+	}
+	if input.RuleID != "" {
+		rule, ok, err := s.organizer.GetRule(r.Context(), input.RuleID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !ok {
+			writeError(w, http.StatusNotFound, fmt.Errorf("organizer rule not found"))
+			return
+		}
+		input.Rule = rule
 	}
 	plan, err := organizer.NewPlanner().Build(input)
 	if err != nil {
@@ -1242,6 +1940,7 @@ func (s *Server) handleAutomationAction(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		queued := s.tasks.Enqueue(taskType, "automation: "+found.Name)
+		s.tasks.Log(queued.ID, task.LogLevelInfo, fmt.Sprintf("automation %s (%s) queued task %s", found.ID, found.Type, queued.ID))
 		run, err := s.automations.RecordRun(r.Context(), automation.RecordRunInput{
 			AutomationID: found.ID,
 			TaskID:       queued.ID,
@@ -1251,6 +1950,7 @@ func (s *Server) handleAutomationAction(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		s.tasks.Log(queued.ID, task.LogLevelInfo, "automation run recorded: "+run.ID)
 		writeJSON(w, http.StatusAccepted, map[string]any{"task": queued, "run": run})
 	case "runs":
 		runs, err := s.automations.ListRuns(r.Context(), id)
@@ -1363,6 +2063,15 @@ func parseOptionalInt(value string) (int, error) {
 		return 0, fmt.Errorf("invalid integer query value %q", value)
 	}
 	return parsed, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func parseBoolQuery(value string) (bool, error) {

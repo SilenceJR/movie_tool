@@ -2,8 +2,11 @@ package organizer
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -19,6 +22,124 @@ type SQLStore struct {
 
 func NewSQLStore(db SQLDB) *SQLStore {
 	return &SQLStore{db: db}
+}
+
+func (s *SQLStore) CreateRule(ctx context.Context, input RuleInput) (Rule, error) {
+	now := time.Now().UTC()
+	rule, err := ruleFromInput(input, now)
+	if err != nil {
+		return Rule{}, err
+	}
+	rule.ID = newID("organizer_rule")
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO organizer_rules (
+  id, name, library_id, media_type, target_root, folder_template, file_template,
+  sidecar_policy, action_mode, conflict_policy, enabled, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rule.ID,
+		rule.Name,
+		nullableString(rule.LibraryID),
+		nullableString(rule.MediaType),
+		rule.TargetRoot,
+		rule.FolderTemplate,
+		rule.FileTemplate,
+		rule.SidecarPolicy,
+		string(rule.ActionMode),
+		string(rule.ConflictPolicy),
+		boolInt(rule.Enabled),
+		formatTime(rule.CreatedAt),
+		formatTime(rule.UpdatedAt),
+	)
+	if err != nil {
+		return Rule{}, err
+	}
+	return rule, nil
+}
+
+func (s *SQLStore) GetRule(ctx context.Context, id string) (Rule, bool, error) {
+	rule, err := scanRule(s.db.QueryRowContext(ctx, `
+SELECT id, name, library_id, media_type, target_root, folder_template, file_template,
+       sidecar_policy, action_mode, conflict_policy, enabled, created_at, updated_at
+FROM organizer_rules
+WHERE id = ?`, id))
+	if err == sql.ErrNoRows {
+		return Rule{}, false, nil
+	}
+	if err != nil {
+		return Rule{}, false, err
+	}
+	return rule, true, nil
+}
+
+func (s *SQLStore) ListRules(ctx context.Context) ([]Rule, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, name, library_id, media_type, target_root, folder_template, file_template,
+       sidecar_policy, action_mode, conflict_policy, enabled, created_at, updated_at
+FROM organizer_rules
+ORDER BY name ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var rules []Rule
+	for rows.Next() {
+		rule, err := scanRule(rows)
+		if err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+func (s *SQLStore) UpdateRule(ctx context.Context, id string, input RuleUpdate) (Rule, bool, error) {
+	rule, ok, err := s.GetRule(ctx, id)
+	if err != nil || !ok {
+		return Rule{}, ok, err
+	}
+	applyRuleUpdate(&rule, input)
+	if err := validateRule(rule); err != nil {
+		return Rule{}, true, err
+	}
+	rule.UpdatedAt = time.Now().UTC()
+	_, err = s.db.ExecContext(ctx, `
+UPDATE organizer_rules
+SET name = ?, library_id = ?, media_type = ?, target_root = ?, folder_template = ?,
+    file_template = ?, sidecar_policy = ?, action_mode = ?, conflict_policy = ?,
+    enabled = ?, updated_at = ?
+WHERE id = ?`,
+		rule.Name,
+		nullableString(rule.LibraryID),
+		nullableString(rule.MediaType),
+		rule.TargetRoot,
+		rule.FolderTemplate,
+		rule.FileTemplate,
+		rule.SidecarPolicy,
+		string(rule.ActionMode),
+		string(rule.ConflictPolicy),
+		boolInt(rule.Enabled),
+		formatTime(rule.UpdatedAt),
+		rule.ID,
+	)
+	if err != nil {
+		return Rule{}, true, err
+	}
+	return rule, true, nil
+}
+
+func (s *SQLStore) DeleteRule(ctx context.Context, id string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM organizer_rules WHERE id = ?`, id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
 }
 
 func (s *SQLStore) SavePlan(ctx context.Context, plan Plan) (Plan, error) {
@@ -173,6 +294,58 @@ func scanAction(scanner rowScanner) (Action, error) {
 	action.ExecutedAt = parseNullableTime(executedAt)
 	action.CreatedAt = parseTime(createdAt)
 	return action, nil
+}
+
+func scanRule(scanner rowScanner) (Rule, error) {
+	var rule Rule
+	var libraryID sql.NullString
+	var mediaType sql.NullString
+	var actionMode string
+	var conflictPolicy string
+	var enabled int
+	var createdAt string
+	var updatedAt string
+	err := scanner.Scan(
+		&rule.ID,
+		&rule.Name,
+		&libraryID,
+		&mediaType,
+		&rule.TargetRoot,
+		&rule.FolderTemplate,
+		&rule.FileTemplate,
+		&rule.SidecarPolicy,
+		&actionMode,
+		&conflictPolicy,
+		&enabled,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return Rule{}, err
+	}
+	rule.LibraryID = libraryID.String
+	rule.MediaType = mediaType.String
+	rule.ActionMode = ActionMode(actionMode)
+	rule.ConflictPolicy = ConflictPolicy(conflictPolicy)
+	rule.Enabled = enabled == 1
+	rule.CreatedAt = parseTime(createdAt)
+	rule.UpdatedAt = parseTime(updatedAt)
+	return rule, nil
+}
+
+func newID(prefix string) string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+	}
+	return prefix + "_" + hex.EncodeToString(bytes[:])
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func boolInt(value bool) int {

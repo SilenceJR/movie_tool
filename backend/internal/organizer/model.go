@@ -56,6 +56,32 @@ type Rule struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
+type RuleInput struct {
+	Name           string         `json:"name"`
+	LibraryID      string         `json:"library_id"`
+	MediaType      string         `json:"media_type"`
+	TargetRoot     string         `json:"target_root"`
+	FolderTemplate string         `json:"folder_template"`
+	FileTemplate   string         `json:"file_template"`
+	SidecarPolicy  string         `json:"sidecar_policy"`
+	ActionMode     ActionMode     `json:"action_mode"`
+	ConflictPolicy ConflictPolicy `json:"conflict_policy"`
+	Enabled        bool           `json:"enabled"`
+}
+
+type RuleUpdate struct {
+	Name           *string         `json:"name"`
+	LibraryID      *string         `json:"library_id"`
+	MediaType      *string         `json:"media_type"`
+	TargetRoot     *string         `json:"target_root"`
+	FolderTemplate *string         `json:"folder_template"`
+	FileTemplate   *string         `json:"file_template"`
+	SidecarPolicy  *string         `json:"sidecar_policy"`
+	ActionMode     *ActionMode     `json:"action_mode"`
+	ConflictPolicy *ConflictPolicy `json:"conflict_policy"`
+	Enabled        *bool           `json:"enabled"`
+}
+
 type Plan struct {
 	ID        string     `json:"id"`
 	LibraryID string     `json:"library_id"`

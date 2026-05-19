@@ -103,6 +103,10 @@ func (q *Queue) Logs(id string) []LogEntry {
 	return entries
 }
 
+func (q *Queue) Log(id string, level LogLevel, message string) {
+	q.addLog(context.Background(), id, level, message)
+}
+
 func (q *Queue) addLog(ctx context.Context, id string, level LogLevel, message string) {
 	_, _ = q.store.AddLog(ctx, LogInput{
 		TaskID:  id,

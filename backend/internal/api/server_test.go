@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"movie-tool/backend/internal/config"
@@ -124,6 +125,69 @@ func TestAIProviderCRUD(t *testing.T) {
 
 	deleteResponse := httptest.NewRecorder()
 	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/ai/providers/"+id, nil)
+	server.ServeHTTP(deleteResponse, deleteRequest)
+	if deleteResponse.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 delete, got %d body=%s", deleteResponse.Code, deleteResponse.Body.String())
+	}
+}
+
+func TestIntegrationCRUDAndRefresh(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+
+	createResponse := httptest.NewRecorder()
+	createRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/integrations",
+		bytes.NewBufferString(`{"name":"Emby","server_type":"emby","base_url":"http://emby.local/","api_key":"secret","enabled":true}`),
+	)
+	server.ServeHTTP(createResponse, createRequest)
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 integration, got %d body=%s", createResponse.Code, createResponse.Body.String())
+	}
+	if bytes.Contains(createResponse.Body.Bytes(), []byte("secret")) {
+		t.Fatal("integration response leaked api key")
+	}
+	var created map[string]any
+	if err := json.NewDecoder(createResponse.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created["has_api_key"] != true {
+		t.Fatalf("expected has_api_key true, got %#v", created["has_api_key"])
+	}
+	id := created["id"].(string)
+
+	testResponse := httptest.NewRecorder()
+	testRequest := httptest.NewRequest(http.MethodPost, "/api/integrations/"+id+"/test", nil)
+	server.ServeHTTP(testResponse, testRequest)
+	if testResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 test, got %d body=%s", testResponse.Code, testResponse.Body.String())
+	}
+
+	refreshResponse := httptest.NewRecorder()
+	refreshRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/integrations/"+id+"/refresh",
+		bytes.NewBufferString(`{"library_id":"library-1"}`),
+	)
+	server.ServeHTTP(refreshResponse, refreshRequest)
+	if refreshResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 refresh, got %d body=%s", refreshResponse.Code, refreshResponse.Body.String())
+	}
+	var refreshed map[string]any
+	if err := json.NewDecoder(refreshResponse.Body).Decode(&refreshed); err != nil {
+		t.Fatal(err)
+	}
+	plan := refreshed["plan"].(map[string]any)
+	if plan["endpoint"] != "http://emby.local/Library/Refresh" {
+		t.Fatalf("unexpected refresh endpoint %#v", plan["endpoint"])
+	}
+	taskBody := refreshed["task"].(map[string]any)
+	if taskBody["type"] != "refresh_server" {
+		t.Fatalf("expected refresh_server task, got %#v", taskBody["type"])
+	}
+
+	deleteResponse := httptest.NewRecorder()
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/integrations/"+id, nil)
 	server.ServeHTTP(deleteResponse, deleteRequest)
 	if deleteResponse.Code != http.StatusNoContent {
 		t.Fatalf("expected 204 delete, got %d body=%s", deleteResponse.Code, deleteResponse.Body.String())
@@ -287,6 +351,49 @@ func TestMediaCatalogAndVersions(t *testing.T) {
 	if versions[0]["id"] != secondVersion["id"] || versions[0]["is_default"] != true {
 		t.Fatalf("expected second version as default first entry, got %#v", versions[0])
 	}
+
+	lockResponse := httptest.NewRecorder()
+	lockRequest := httptest.NewRequest(http.MethodPost, "/api/media/"+mediaID+"/lock", nil)
+	server.ServeHTTP(lockResponse, lockRequest)
+	if lockResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 lock, got %d body=%s", lockResponse.Code, lockResponse.Body.String())
+	}
+	var locked map[string]any
+	if err := json.NewDecoder(lockResponse.Body).Decode(&locked); err != nil {
+		t.Fatal(err)
+	}
+	if locked["locked"] != true || locked["match_status"] != "locked" {
+		t.Fatalf("expected locked media, got %#v", locked)
+	}
+
+	unlockResponse := httptest.NewRecorder()
+	unlockRequest := httptest.NewRequest(http.MethodPost, "/api/media/"+mediaID+"/unlock", nil)
+	server.ServeHTTP(unlockResponse, unlockRequest)
+	if unlockResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 unlock, got %d body=%s", unlockResponse.Code, unlockResponse.Body.String())
+	}
+	var unlocked map[string]any
+	if err := json.NewDecoder(unlockResponse.Body).Decode(&unlocked); err != nil {
+		t.Fatal(err)
+	}
+	if unlocked["locked"] != false || unlocked["match_status"] != "matched" {
+		t.Fatalf("expected unlocked media, got %#v", unlocked)
+	}
+
+	rescrapeResponse := httptest.NewRecorder()
+	rescrapeRequest := httptest.NewRequest(http.MethodPost, "/api/media/"+mediaID+"/rescrape", nil)
+	server.ServeHTTP(rescrapeResponse, rescrapeRequest)
+	if rescrapeResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 rescrape, got %d body=%s", rescrapeResponse.Code, rescrapeResponse.Body.String())
+	}
+	var rescrape map[string]any
+	if err := json.NewDecoder(rescrapeResponse.Body).Decode(&rescrape); err != nil {
+		t.Fatal(err)
+	}
+	taskBody := rescrape["task"].(map[string]any)
+	if taskBody["type"] != "scrape_media" {
+		t.Fatalf("expected scrape_media task, got %#v", taskBody["type"])
+	}
 }
 
 func TestPeopleTagsCollectionsMediaQueries(t *testing.T) {
@@ -342,6 +449,108 @@ func TestMediaTranslations(t *testing.T) {
 	server.ServeHTTP(upsertResponse, upsertRequest)
 	if upsertResponse.Code != http.StatusCreated {
 		t.Fatalf("expected 201 upsert translation, got %d body=%s", upsertResponse.Code, upsertResponse.Body.String())
+	}
+}
+
+func TestSTRMRuleAndGeneratePlan(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+
+	root := t.TempDir()
+	output := filepath.Join(t.TempDir(), "strm")
+	if err := os.MkdirAll(filepath.Join(root, "Movies"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Movies", "Inception.2010.mkv"), []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+	scanResponse := httptest.NewRecorder()
+	scanRequest := httptest.NewRequest(http.MethodPost, "/api/libraries/"+library["id"].(string)+"/scan", nil)
+	server.ServeHTTP(scanResponse, scanRequest)
+	if scanResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 scan, got %d body=%s", scanResponse.Code, scanResponse.Body.String())
+	}
+
+	rule := createJSON(t, server, "/api/strm/rules", `{"name":"LAN","source_prefix":"`+root+`","target_prefix":"http://nas.local/media","output_path":"`+output+`","enabled":true}`)
+	validateResponse := httptest.NewRecorder()
+	validateRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/strm/validate",
+		bytes.NewBufferString(`{"rule":{"name":"LAN","source_prefix":"`+root+`","target_prefix":"http://nas.local/media","output_path":"`+output+`"},"path":"`+filepath.Join(root, "Movies", "Inception.2010.mkv")+`"}`),
+	)
+	server.ServeHTTP(validateResponse, validateRequest)
+	if validateResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 validate, got %d body=%s", validateResponse.Code, validateResponse.Body.String())
+	}
+
+	generateResponse := httptest.NewRecorder()
+	generateRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/strm/generate",
+		bytes.NewBufferString(`{"rule_id":"`+rule["id"].(string)+`","library_id":"`+library["id"].(string)+`","dry_run":true}`),
+	)
+	server.ServeHTTP(generateResponse, generateRequest)
+	if generateResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 generate, got %d body=%s", generateResponse.Code, generateResponse.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(generateResponse.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	plan := body["plan"].(map[string]any)
+	entries := plan["entries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 strm entry, got %d", len(entries))
+	}
+	entry := entries[0].(map[string]any)
+	if entry["target_url"] != "http://nas.local/media/Movies/Inception.2010.mkv" {
+		t.Fatalf("unexpected target url %#v", entry["target_url"])
+	}
+	if entry["content"] != "http://nas.local/media/Movies/Inception.2010.mkv\n" {
+		t.Fatalf("unexpected strm content %#v", entry["content"])
+	}
+}
+
+func TestGenerateNFOFromMediaAndTranslations(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+
+	mediaID := createJSON(t, server, "/api/media", `{"library_id":"library-1","media_type":"movie","title":"Inception","original_title":"Inception","year":2010,"overview":"English plot"}`)["id"].(string)
+	postJSON(t, server, "/api/media-translations", `{"media_id":"`+mediaID+`","language":"zh-CN","field_name":"title","value":"盗梦空间","source":"manual"}`)
+	postJSON(t, server, "/api/media-translations", `{"media_id":"`+mediaID+`","language":"zh-CN","field_name":"overview","value":"中文简介","source":"manual"}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/nfo/generate",
+		bytes.NewBufferString(`{"media_id":"`+mediaID+`","language":"zh-CN","output_dir":"/library/Inception","dry_run":true}`),
+	)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 nfo generate, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	taskBody := body["task"].(map[string]any)
+	if taskBody["type"] != "generate_nfo" {
+		t.Fatalf("expected generate_nfo task, got %#v", taskBody["type"])
+	}
+	plan := body["plan"].(map[string]any)
+	entries := plan["entries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("expected one nfo entry, got %d", len(entries))
+	}
+	entry := entries[0].(map[string]any)
+	content := entry["content"].(string)
+	if !strings.Contains(content, "<title>盗梦空间</title>") {
+		t.Fatalf("expected localized title in nfo:\n%s", content)
+	}
+	if !strings.Contains(content, "<plot>中文简介</plot>") {
+		t.Fatalf("expected localized plot in nfo:\n%s", content)
 	}
 }
 
@@ -486,9 +695,15 @@ func assertTranslationList(t *testing.T, server http.Handler, path string, value
 	if err := json.NewDecoder(response.Body).Decode(&items); err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0]["value"] != value {
+	for _, item := range items {
+		if item["value"] == value {
+			return
+		}
+	}
+	if len(items) == 0 {
 		t.Fatalf("expected translated value %q from %s, got %#v", value, path, items)
 	}
+	t.Fatalf("expected translated value %q from %s, got %#v", value, path, items)
 }
 
 func TestCreateOrganizerPlan(t *testing.T) {
@@ -535,9 +750,67 @@ func TestCreateOrganizerPlan(t *testing.T) {
 	}
 }
 
+func TestOrganizerRulesAndPlanByRuleID(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+
+	rule := createJSON(t, server, "/api/organizer/rules", `{"name":"Movies","library_id":"l1","media_type":"movie","target_root":"/library/movies","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"move","enabled":true}`)
+	ruleID := rule["id"].(string)
+
+	updateResponse := httptest.NewRecorder()
+	updateRequest := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/organizer/rules/"+ruleID,
+		bytes.NewBufferString(`{"conflict_policy":"rename"}`),
+	)
+	server.ServeHTTP(updateResponse, updateRequest)
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 rule update, got %d body=%s", updateResponse.Code, updateResponse.Body.String())
+	}
+
+	listResponse := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/organizer/rules", nil)
+	server.ServeHTTP(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 rule list, got %d body=%s", listResponse.Code, listResponse.Body.String())
+	}
+
+	planResponse := httptest.NewRecorder()
+	planRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/organizer/plan",
+		bytes.NewBufferString(`{
+			"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Inception","year":2010},
+			"versions":[{"id":"v1","resolution":"2160p","source":"bluray"}],
+			"files":[{"id":"f1","media_id":"m1","version_id":"v1","path":"/downloads/Inception.mkv"}],
+			"rule_id":"`+ruleID+`"
+		}`),
+	)
+	server.ServeHTTP(planResponse, planRequest)
+	if planResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 plan, got %d body=%s", planResponse.Code, planResponse.Body.String())
+	}
+	var plan map[string]any
+	if err := json.NewDecoder(planResponse.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	actions := plan["actions"].([]any)
+	action := actions[0].(map[string]any)
+	if action["target_path"] != "/library/movies/Inception (2010)/Inception - 2160p.mkv" {
+		t.Fatalf("unexpected target path %#v", action["target_path"])
+	}
+
+	deleteResponse := httptest.NewRecorder()
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/organizer/rules/"+ruleID, nil)
+	server.ServeHTTP(deleteResponse, deleteRequest)
+	if deleteResponse.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 rule delete, got %d body=%s", deleteResponse.Code, deleteResponse.Body.String())
+	}
+}
+
 func TestScanLibrary(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "Inception.2010.mkv"), []byte("movie"), 0o644); err != nil {
+	filePath := filepath.Join(root, "Inception.2010.2160p.BluRay.REMUX.HEVC.HDR10-GROUP.mkv")
+	if err := os.WriteFile(filePath, []byte("movie"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -591,9 +864,12 @@ func TestScanLibrary(t *testing.T) {
 	if files[0]["parsed_title"] != "Inception" {
 		t.Fatalf("expected parsed title Inception, got %#v", files[0]["parsed_title"])
 	}
+	if files[0]["media_id"] == "" || files[0]["version_id"] == "" {
+		t.Fatalf("expected scan to link media/version, got %#v", files[0])
+	}
 
 	pathResponse := httptest.NewRecorder()
-	pathRequest := httptest.NewRequest(http.MethodGet, "/api/media-files?path="+filepath.Join(root, "Inception.2010.mkv"), nil)
+	pathRequest := httptest.NewRequest(http.MethodGet, "/api/media-files?path="+filePath, nil)
 	server.ServeHTTP(pathResponse, pathRequest)
 	if pathResponse.Code != http.StatusOK {
 		t.Fatalf("expected 200 getting media file by path, got %d body=%s", pathResponse.Code, pathResponse.Body.String())
@@ -605,6 +881,36 @@ func TestScanLibrary(t *testing.T) {
 	}
 	if fileByPath["parsed_title"] != "Inception" {
 		t.Fatalf("expected parsed title by path, got %#v", fileByPath["parsed_title"])
+	}
+
+	mediaResponse := httptest.NewRecorder()
+	mediaRequest := httptest.NewRequest(http.MethodGet, "/api/media?library_id="+created["id"].(string)+"&title=Inception", nil)
+	server.ServeHTTP(mediaResponse, mediaRequest)
+	if mediaResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing catalog media, got %d body=%s", mediaResponse.Code, mediaResponse.Body.String())
+	}
+	var items []map[string]any
+	if err := json.NewDecoder(mediaResponse.Body).Decode(&items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one catalog media item, got %d", len(items))
+	}
+	versionsResponse := httptest.NewRecorder()
+	versionsRequest := httptest.NewRequest(http.MethodGet, "/api/media/"+items[0]["id"].(string)+"/versions", nil)
+	server.ServeHTTP(versionsResponse, versionsRequest)
+	if versionsResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing versions, got %d body=%s", versionsResponse.Code, versionsResponse.Body.String())
+	}
+	var versions []map[string]any
+	if err := json.NewDecoder(versionsResponse.Body).Decode(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("expected one scanned version, got %d", len(versions))
+	}
+	if versions[0]["resolution"] != "2160p" || versions[0]["source"] != "remux" || versions[0]["video_codec"] != "hevc" || versions[0]["hdr_format"] != "hdr10" {
+		t.Fatalf("unexpected parsed version metadata: %#v", versions[0])
 	}
 }
 
@@ -746,6 +1052,28 @@ func TestAutomationCRUDAndRun(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("expected 1 run, got %d", len(runs))
 	}
+	var runBody map[string]any
+	if err := json.NewDecoder(runResponse.Body).Decode(&runBody); err != nil {
+		t.Fatal(err)
+	}
+	taskBody := runBody["task"].(map[string]any)
+	taskID := taskBody["id"].(string)
+	logsResponse := httptest.NewRecorder()
+	logsRequest := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskID+"/logs", nil)
+	server.ServeHTTP(logsResponse, logsRequest)
+	if logsResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 task logs, got %d body=%s", logsResponse.Code, logsResponse.Body.String())
+	}
+	var logs []map[string]any
+	if err := json.NewDecoder(logsResponse.Body).Decode(&logs); err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) < 3 {
+		t.Fatalf("expected automation context logs, got %#v", logs)
+	}
+	if logs[1]["message"] != "automation "+id+" (scan_library) queued task "+taskID {
+		t.Fatalf("expected automation context log, got %#v", logs[1])
+	}
 
 	disabledListResponse := httptest.NewRecorder()
 	disabledListRequest := httptest.NewRequest(http.MethodGet, "/api/automations?enabled=false", nil)
@@ -843,6 +1171,70 @@ func TestScrapeDecisions(t *testing.T) {
 	if decisions[0]["locked"] != true {
 		t.Fatalf("expected locked decision, got %#v", decisions[0]["locked"])
 	}
+}
+
+func TestScrapeDecisionAppliesCandidateMetadata(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+
+	mediaID := createJSON(t, server, "/api/media", `{"library_id":"library-1","media_type":"movie","title":"Unknown","display_language":"zh-CN"}`)["id"].(string)
+	candidateResponse := httptest.NewRecorder()
+	candidateRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/scrape-candidates",
+		bytes.NewBufferString(`{
+			"media_id":"`+mediaID+`",
+			"provider":"tmdb",
+			"external_id":"27205",
+			"title":"盗梦空间",
+			"original_title":"Inception",
+			"year":2010,
+			"overview":"中文简介",
+			"score":96
+		}`),
+	)
+	server.ServeHTTP(candidateResponse, candidateRequest)
+	if candidateResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 candidate, got %d body=%s", candidateResponse.Code, candidateResponse.Body.String())
+	}
+	var candidate map[string]any
+	if err := json.NewDecoder(candidateResponse.Body).Decode(&candidate); err != nil {
+		t.Fatal(err)
+	}
+
+	decisionResponse := httptest.NewRecorder()
+	decisionRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/scrape-decisions",
+		bytes.NewBufferString(`{"media_id":"`+mediaID+`","candidate_id":"`+candidate["id"].(string)+`","decision_source":"user","decision":"select","confidence":96,"locked":true}`),
+	)
+	server.ServeHTTP(decisionResponse, decisionRequest)
+	if decisionResponse.Code != http.StatusCreated {
+		t.Fatalf("expected 201 decision, got %d body=%s", decisionResponse.Code, decisionResponse.Body.String())
+	}
+	var decisionBody map[string]any
+	if err := json.NewDecoder(decisionResponse.Body).Decode(&decisionBody); err != nil {
+		t.Fatal(err)
+	}
+	applied := decisionBody["applied"].(map[string]any)
+	if applied["status"] != "applied" {
+		t.Fatalf("expected applied metadata, got %#v", applied)
+	}
+
+	getMediaResponse := httptest.NewRecorder()
+	getMediaRequest := httptest.NewRequest(http.MethodGet, "/api/media/"+mediaID, nil)
+	server.ServeHTTP(getMediaResponse, getMediaRequest)
+	if getMediaResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 media, got %d body=%s", getMediaResponse.Code, getMediaResponse.Body.String())
+	}
+	var mediaItem map[string]any
+	if err := json.NewDecoder(getMediaResponse.Body).Decode(&mediaItem); err != nil {
+		t.Fatal(err)
+	}
+	if mediaItem["title"] != "盗梦空间" || mediaItem["match_status"] != "matched" || mediaItem["locked"] != true {
+		t.Fatalf("expected applied catalog metadata, got %#v", mediaItem)
+	}
+
+	assertTranslationList(t, server, "/api/media/"+mediaID+"/translations?language=zh-CN", "盗梦空间")
 }
 
 func TestConfig(t *testing.T) {

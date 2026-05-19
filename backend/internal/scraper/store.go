@@ -42,6 +42,7 @@ type CandidateInput struct {
 
 type Store interface {
 	CreateCandidate(context.Context, CandidateInput) (StoredCandidate, error)
+	GetCandidate(context.Context, string) (StoredCandidate, bool, error)
 	ListCandidates(context.Context, CandidateQuery) ([]StoredCandidate, error)
 	CreateDecision(context.Context, DecisionInput) (Decision, error)
 	ListDecisions(context.Context, DecisionQuery) ([]Decision, error)
@@ -96,6 +97,16 @@ func (s *MemoryStore) CreateCandidate(_ context.Context, input CandidateInput) (
 	}
 	s.candidates[candidate.ID] = candidate
 	return cloneCandidate(candidate), nil
+}
+
+func (s *MemoryStore) GetCandidate(_ context.Context, id string) (StoredCandidate, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	candidate, ok := s.candidates[id]
+	if !ok {
+		return StoredCandidate{}, false, nil
+	}
+	return cloneCandidate(candidate), true, nil
 }
 
 func (s *MemoryStore) ListCandidates(_ context.Context, query CandidateQuery) ([]StoredCandidate, error) {

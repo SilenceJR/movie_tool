@@ -58,6 +58,7 @@ type PlanRequest struct {
 	Media    MediaInfo     `json:"media"`
 	Versions []VersionInfo `json:"versions"`
 	Files    []FileInfo    `json:"files"`
+	RuleID   string        `json:"rule_id"`
 	Rule     Rule          `json:"rule"`
 }
 

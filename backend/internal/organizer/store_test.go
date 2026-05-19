@@ -43,3 +43,43 @@ func TestMemoryStorePlan(t *testing.T) {
 		t.Fatalf("expected 1 action, got %d", len(actions))
 	}
 }
+
+func TestMemoryStoreRuleCRUD(t *testing.T) {
+	store := NewMemoryStore()
+	rule, err := store.CreateRule(context.Background(), RuleInput{
+		Name:       "Movies",
+		LibraryID:  "library-1",
+		MediaType:  "movie",
+		TargetRoot: "/library/movies",
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rule.ActionMode != ActionMove {
+		t.Fatalf("expected default move action, got %s", rule.ActionMode)
+	}
+	if rule.ConflictPolicy != ConflictSkip {
+		t.Fatalf("expected default skip conflict policy, got %s", rule.ConflictPolicy)
+	}
+
+	targetRoot := "/library/films"
+	updated, ok, err := store.UpdateRule(context.Background(), rule.ID, RuleUpdate{TargetRoot: &targetRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected rule update")
+	}
+	if updated.TargetRoot != targetRoot {
+		t.Fatalf("expected target root update, got %q", updated.TargetRoot)
+	}
+
+	rules, err := store.ListRules(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected one rule, got %d", len(rules))
+	}
+}

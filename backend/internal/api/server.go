@@ -179,6 +179,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/libraries/", s.handleDeleteLibrary)
 	s.mux.HandleFunc("GET /api/download-directories", s.handleListDownloadDirectories)
 	s.mux.HandleFunc("POST /api/download-directories", s.handleCreateDownloadDirectory)
+	s.mux.HandleFunc("POST /api/download-directories/watch/run", s.handleRunDownloadDirectoryWatch)
 	s.mux.HandleFunc("GET /api/download-directories/", s.handleGetDownloadDirectory)
 	s.mux.HandleFunc("PATCH /api/download-directories/", s.handleUpdateDownloadDirectory)
 	s.mux.HandleFunc("POST /api/download-directories/", s.handleDownloadDirectoryAction)
@@ -804,52 +805,129 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, fmt.Errorf("download directory is disabled"))
 		return
 	}
-	targetLibrary, ok, err := s.libraries.Get(r.Context(), directory.LibraryID)
+	options, err := parseDownloadScanOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	result, status, err := s.scanDownloadDirectory(r.Context(), directory, options)
+	if err != nil {
+		writeError(w, status, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, result)
+}
+
+func (s *Server) handleRunDownloadDirectoryWatch(w http.ResponseWriter, r *http.Request) {
+	options, err := parseDownloadScanOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	directories, err := s.downloads.ListWatchEnabled(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if !ok {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("target library not found"))
-		return
-	}
 
-	mediaType := firstNonEmpty(directory.MediaType, string(targetLibrary.MediaType))
+	results := make([]downloadDirectoryScanResult, 0, len(directories))
+	failures := make([]downloadDirectoryWatchFailure, 0)
+	for _, directory := range directories {
+		result, status, err := s.scanDownloadDirectory(r.Context(), directory, options)
+		if err != nil {
+			failures = append(failures, downloadDirectoryWatchFailure{
+				DownloadDirectory: directory,
+				Status:            status,
+				Error:             err.Error(),
+			})
+			continue
+		}
+		results = append(results, result)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"download_directories": directories,
+		"results":              results,
+		"failed":               failures,
+		"count":                len(results),
+		"failure_count":        len(failures),
+	})
+}
+
+type downloadScanOptions struct {
+	MinStableAge    time.Duration
+	BatchSize       int
+	ContinueOnError bool
+	OrganizerRuleID string
+}
+
+type downloadDirectoryScanResult struct {
+	Task              task.Task            `json:"task"`
+	DownloadDirectory download.Directory   `json:"download_directory"`
+	TargetLibrary     library.Library      `json:"target_library"`
+	Files             []scanner.ParsedFile `json:"files"`
+	Imported          []media.File         `json:"imported"`
+	Failed            []scanImportFailure  `json:"failed"`
+	Count             int                  `json:"count"`
+	BatchCount        int                  `json:"batch_count"`
+	OrganizerPlan     *organizer.Plan      `json:"organizer_plan,omitempty"`
+}
+
+type downloadDirectoryWatchFailure struct {
+	DownloadDirectory download.Directory `json:"download_directory"`
+	Status            int                `json:"status"`
+	Error             string             `json:"error"`
+}
+
+func parseDownloadScanOptions(r *http.Request) (downloadScanOptions, error) {
 	minStableAge, err := parseOptionalDurationSeconds(r.URL.Query().Get("min_stable_seconds"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return downloadScanOptions{}, err
 	}
 	batchSize, err := parseOptionalInt(r.URL.Query().Get("batch_size"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return downloadScanOptions{}, err
 	}
 	if batchSize < 0 {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("batch_size cannot be negative"))
-		return
+		return downloadScanOptions{}, fmt.Errorf("batch_size cannot be negative")
 	}
 	continueOnError := false
 	if value := r.URL.Query().Get("continue_on_error"); value != "" {
 		continueOnError, err = parseBoolQuery(value)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
+			return downloadScanOptions{}, err
 		}
 	}
+	return downloadScanOptions{
+		MinStableAge:    minStableAge,
+		BatchSize:       batchSize,
+		ContinueOnError: continueOnError,
+		OrganizerRuleID: strings.TrimSpace(r.URL.Query().Get("organizer_rule_id")),
+	}, nil
+}
+
+func (s *Server) scanDownloadDirectory(ctx context.Context, directory download.Directory, options downloadScanOptions) (downloadDirectoryScanResult, int, error) {
+	targetLibrary, ok, err := s.libraries.Get(ctx, directory.LibraryID)
+	if err != nil {
+		return downloadDirectoryScanResult{}, http.StatusInternalServerError, err
+	}
+	if !ok {
+		return downloadDirectoryScanResult{}, http.StatusBadRequest, fmt.Errorf("target library not found")
+	}
+
+	mediaType := firstNonEmpty(directory.MediaType, string(targetLibrary.MediaType))
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "scan download directory: "+directory.Name)
 	taskRecord, _ = s.tasks.Start(taskRecord.ID)
 	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "walking "+directory.Path)
-	if minStableAge > 0 {
-		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("skipping files modified within %s", minStableAge))
+	if options.MinStableAge > 0 {
+		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("skipping files modified within %s", options.MinStableAge))
 	}
-	if batchSize > 0 {
-		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("importing files in batches of %d", batchSize))
+	if options.BatchSize > 0 {
+		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("importing files in batches of %d", options.BatchSize))
 	}
 
 	files, err := scanner.NewScanner().Walk(scanner.ScanRequest{
 		Root:           directory.Path,
-		MinModifiedAge: minStableAge,
+		MinModifiedAge: options.MinStableAge,
 		Library: scanner.LibraryInfo{
 			ID:        targetLibrary.ID,
 			Name:      targetLibrary.Name,
@@ -859,46 +937,40 @@ func (s *Server) handleScanDownloadDirectory(w http.ResponseWriter, r *http.Requ
 	})
 	if err != nil {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return downloadDirectoryScanResult{}, http.StatusBadRequest, err
 	}
 
-	imported, _, batchCount, failures, err := s.importScannedFiles(r.Context(), files, "", batchSize, continueOnError)
+	imported, _, batchCount, failures, err := s.importScannedFiles(ctx, files, "", options.BatchSize, options.ContinueOnError)
 	if err != nil {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return downloadDirectoryScanResult{}, http.StatusInternalServerError, err
 	}
 	for _, failure := range failures {
 		s.tasks.Log(taskRecord.ID, task.LogLevelWarn, fmt.Sprintf("failed to import %s: %s", failure.Path, failure.Error))
 	}
 	var organizerPlan *organizer.Plan
-	if ruleID := strings.TrimSpace(r.URL.Query().Get("organizer_rule_id")); ruleID != "" {
-		plan, err := s.createOrganizerPlanForDownloadDirectory(r.Context(), ruleID, directory)
+	if options.OrganizerRuleID != "" {
+		plan, err := s.createOrganizerPlanForDownloadDirectory(ctx, options.OrganizerRuleID, directory)
 		if err != nil {
 			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-			writeError(w, http.StatusBadRequest, err)
-			return
+			return downloadDirectoryScanResult{}, http.StatusBadRequest, err
 		}
 		organizerPlan = &plan
 		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, "created organizer plan "+plan.ID)
 	}
 	s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("imported %d download files", len(imported)))
 	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, fmt.Sprintf("scan download directory: %s (%d files)", directory.Name, len(imported)))
-	response := map[string]any{
-		"task":               taskRecord,
-		"download_directory": directory,
-		"target_library":     targetLibrary,
-		"files":              files,
-		"imported":           imported,
-		"failed":             failures,
-		"count":              len(imported),
-		"batch_count":        batchCount,
-	}
-	if organizerPlan != nil {
-		response["organizer_plan"] = organizerPlan
-	}
-	writeJSON(w, http.StatusAccepted, response)
+	return downloadDirectoryScanResult{
+		Task:              taskRecord,
+		DownloadDirectory: directory,
+		TargetLibrary:     targetLibrary,
+		Files:             files,
+		Imported:          imported,
+		Failed:            failures,
+		Count:             len(imported),
+		BatchCount:        batchCount,
+		OrganizerPlan:     organizerPlan,
+	}, http.StatusAccepted, nil
 }
 
 func (s *Server) createOrganizerPlanForDownloadDirectory(ctx context.Context, ruleID string, directory download.Directory) (organizer.Plan, error) {

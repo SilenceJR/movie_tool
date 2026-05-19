@@ -53,8 +53,8 @@ backend/internal/task         任务系统
 - 已有 `/api/tasks` 列表、日志、取消、retry 入口；扫描/清理这类同步执行的 API 会记录 running/succeeded/failed 状态和任务日志。
 - 已有 `/api/organizer/plan` dry-run 整理计划入口。
 - 已有 `/api/libraries/{id}/scan` 扫描入口，会递归发现媒体文件，创建或复用 media item/version，写入 `media_files`，并标记缺失文件。
-- 已有 `/api/download-directories` CRUD 和 `/api/download-directories/{id}/scan`；下载目录可绑定目标媒体库，扫描完成目录文件并作为待整理来源入库，且可用 `min_stable_seconds` 跳过仍在写入的近期文件；扫描时传入 `organizer_rule_id` 可同步生成限定该下载目录来源的整理 dry-run。
-- 下载目录存储层已提供启用监听目标查询，只返回同时 `enabled` 和 `watch_enabled` 的目录，并保持稳定排序，后续真实 watcher/轮询器可直接复用该入口。
+- 已有 `/api/download-directories` CRUD、`/api/download-directories/{id}/scan` 和 `/api/download-directories/watch/run`；下载目录可绑定目标媒体库，扫描完成目录文件并作为待整理来源入库，且可用 `min_stable_seconds` 跳过仍在写入的近期文件；扫描时传入 `organizer_rule_id` 可同步生成限定该下载目录来源的整理 dry-run。
+- 下载目录监听运行入口会只处理同时 `enabled` 和 `watch_enabled` 的目录，并复用单目录扫描、批量入库、失败隔离与可选整理计划生成逻辑；后续真实 watcher/轮询器可直接触发该服务路径。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
 - 已有媒体文件解析器。
@@ -105,8 +105,8 @@ backend/internal/task         任务系统
 ## 4. 下一步建议
 
 ```text
-1. 为下载目录接入真实 watcher，文件创建/完成且通过稳定性检测后自动触发扫描、匹配与可选整理计划生成流程。
-2. 为下载目录监听增加轮询/事件触发入口、事件去抖、失败重试和批量合并。
+1. 为下载目录接入后台轮询/真实 watcher，定期或在文件事件后调用监听运行入口。
+2. 为下载目录监听增加事件去抖、失败重试和批量合并。
 3. 为扫描任务增加失败文件的持久化追踪与重试入口。
 4. 为 organizer 执行结果增加回滚能力和更细的失败恢复。
 5. 为批量 organizer plan 增加冲突批量确认覆盖处理。

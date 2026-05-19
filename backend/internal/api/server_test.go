@@ -1518,6 +1518,79 @@ func TestDownloadDirectoryScanAndOrganizerPlan(t *testing.T) {
 	}
 }
 
+func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T) {
+	mediaRoot := t.TempDir()
+	watchedRoot := t.TempDir()
+	disabledRoot := t.TempDir()
+	notWatchedRoot := t.TempDir()
+
+	watchedPath := filepath.Join(watchedRoot, "Arrival.2016.1080p.WEB-DL.mkv")
+	if err := os.WriteFile(watchedPath, []byte("watched"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(disabledRoot, "Disabled.2011.mkv"), []byte("disabled"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(notWatchedRoot, "Not.Watched.2012.mkv"), []byte("not watched"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+mediaRoot+`"}`)
+	libraryID := library["id"].(string)
+	watchedDir := createJSON(t, server, "/api/download-directories", `{
+		"name":"Watched",
+		"path":"`+watchedRoot+`",
+		"library_id":"`+libraryID+`",
+		"action_mode":"hardlink",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+	_ = createJSON(t, server, "/api/download-directories", `{
+		"name":"Disabled",
+		"path":"`+disabledRoot+`",
+		"library_id":"`+libraryID+`",
+		"action_mode":"hardlink",
+		"enabled":false,
+		"watch_enabled":true
+	}`)
+	_ = createJSON(t, server, "/api/download-directories", `{
+		"name":"Not watched",
+		"path":"`+notWatchedRoot+`",
+		"library_id":"`+libraryID+`",
+		"action_mode":"hardlink",
+		"enabled":true,
+		"watch_enabled":false
+	}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 watch run, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["count"] != float64(1) || body["failure_count"] != float64(0) {
+		t.Fatalf("expected one successful watch scan and no failures, got %#v", body)
+	}
+	directories := body["download_directories"].([]any)
+	if len(directories) != 1 || directories[0].(map[string]any)["id"] != watchedDir["id"] {
+		t.Fatalf("expected only watched directory to be scanned, got %#v", directories)
+	}
+	results := body["results"].([]any)
+	imported := results[0].(map[string]any)["imported"].([]any)
+	if len(imported) != 1 {
+		t.Fatalf("expected one imported watched file, got %#v", imported)
+	}
+	if imported[0].(map[string]any)["path"] != watchedPath {
+		t.Fatalf("expected imported watched path %q, got %#v", watchedPath, imported[0])
+	}
+}
+
 func TestAutomationCRUDAndRun(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

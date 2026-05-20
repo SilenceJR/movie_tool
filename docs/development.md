@@ -83,7 +83,7 @@ backend/internal/task         任务系统
 - 执行成功后会把对应 `media_files` 路径回写到目标媒体目录；显式计划里不存在于库内的文件会跳过路径回写但保留执行结果。
 - `POST /api/organizer/plan` 可显式传入 media/versions/files，也已支持 `rule_id + media_id` 或 `rule_id + library_id` 自动从 catalog/media_files 组装 dry-run，可按 `match_status`、`file_status`、`media_type`、`source_path_prefix`、`download_directory_id`、`action_status` 过滤批量计划，把下载目录来源文件按规则预览为 hardlink/symlink/move/copy 到目标媒体库目录。
 - dry-run 会检测计划内重复目标和磁盘上已有目标；`skip` 会标记 skipped，`rename` 会预演重命名目标，`overwrite_with_confirmation` 会标记 conflict 等待确认。
-- 冲突计划可通过 `POST /api/organizer/plans/{id}/skip-conflicts` 批量把 conflict 动作转为 skipped，也可通过 `POST /api/organizer/plans/{id}/rename-conflicts` 批量重命名目标并转回 pending；磁盘目标已存在的 overwrite conflict 可通过 `POST /api/organizer/plans/{id}/confirm-overwrite-conflicts` 批量确认，执行时会先删除既有目标再执行 move/copy/hardlink/symlink。
+- 冲突计划可通过 `POST /api/organizer/plans/{id}/skip-conflicts` 批量把 conflict 动作转为 skipped，也可通过 `POST /api/organizer/plans/{id}/rename-conflicts` 批量重命名目标并转回 pending；磁盘目标已存在的 overwrite conflict 可通过 `POST /api/organizer/plans/{id}/confirm-overwrite-conflicts` 批量确认，执行时会先删除既有目标再执行 move/copy/hardlink/symlink。三个冲突处理 API 均支持 `action_id`、`action_type`、`conflict_reason`、`source_path_prefix`、`target_path_prefix` 筛选，便于局部处理批量计划。
 - 失败计划可通过 `POST /api/organizer/plans/{id}/retry` 重试失败动作；如果失败发生在媒体文件路径回写阶段，会只重试数据库路径回写，避免重复移动/复制已完成的文件操作。
 - 已成功执行的整理计划可通过 `POST /api/organizer/plans/{id}/rollback` 回滚；move 会把目标移回源路径，copy/hardlink/symlink 会删除目标，并同步恢复关联 `media_files` 路径；如果回滚中途失败，修复文件系统问题后可再次调用 rollback 继续恢复失败动作。
 - 仍需补齐更细的批量计划过滤条件。
@@ -112,6 +112,6 @@ backend/internal/task         任务系统
 ```text
 1. 为下载目录监听增加失败重试和批量合并。
 2. 为 organizer 执行结果增加更细的失败恢复。
-3. 为批量 organizer plan 增加更细的冲突筛选与局部确认能力。
+3. 为批量 organizer plan 增加按条件预览冲突处理影响范围。
 4. 为下载目录监听接入真实文件系统事件源。
 ```

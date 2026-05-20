@@ -3137,7 +3137,8 @@ func (s *Server) handleSkipOrganizerPlanConflicts(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan conflicts cannot be skipped from status %q", plan.Status))
 		return
 	}
-	updated, changed := organizer.SkipConflicts(plan, time.Now().UTC())
+	filter := parseOrganizerConflictFilter(r)
+	updated, changed := organizer.SkipConflicts(plan, time.Now().UTC(), filter)
 	if changed == 0 {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no conflicts to skip"))
 		return
@@ -3167,7 +3168,8 @@ func (s *Server) handleRenameOrganizerPlanConflicts(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan conflicts cannot be renamed from status %q", plan.Status))
 		return
 	}
-	updated, changed := organizer.RenameConflicts(plan, time.Now().UTC(), pathExists)
+	filter := parseOrganizerConflictFilter(r)
+	updated, changed := organizer.RenameConflicts(plan, time.Now().UTC(), pathExists, filter)
 	if changed == 0 {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no conflicts to rename"))
 		return
@@ -3197,7 +3199,8 @@ func (s *Server) handleConfirmOrganizerPlanOverwriteConflicts(w http.ResponseWri
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan conflicts cannot be confirmed from status %q", plan.Status))
 		return
 	}
-	updated, changed := organizer.ConfirmOverwriteConflicts(plan, time.Now().UTC())
+	filter := parseOrganizerConflictFilter(r)
+	updated, changed := organizer.ConfirmOverwriteConflicts(plan, time.Now().UTC(), filter)
 	if changed == 0 {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no overwrite conflicts to confirm"))
 		return
@@ -3211,6 +3214,30 @@ func (s *Server) handleConfirmOrganizerPlanOverwriteConflicts(w http.ResponseWri
 		"plan":    saved,
 		"changed": changed,
 	})
+}
+
+func parseOrganizerConflictFilter(r *http.Request) organizer.ConflictFilter {
+	query := r.URL.Query()
+	return organizer.ConflictFilter{
+		ActionIDs:        splitQueryValues(query["action_id"]),
+		ActionType:       organizer.ActionMode(strings.TrimSpace(query.Get("action_type"))),
+		ConflictReason:   strings.TrimSpace(query.Get("conflict_reason")),
+		SourcePathPrefix: strings.TrimSpace(query.Get("source_path_prefix")),
+		TargetPathPrefix: strings.TrimSpace(query.Get("target_path_prefix")),
+	}
+}
+
+func splitQueryValues(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				result = append(result, part)
+			}
+		}
+	}
+	return result
 }
 
 func (s *Server) executeOrganizerPlan(ctx context.Context, plan organizer.Plan, message string) (task.Task, organizer.Plan, error) {

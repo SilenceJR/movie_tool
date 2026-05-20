@@ -841,6 +841,58 @@ func TestSkipOrganizerPlanConflicts(t *testing.T) {
 	}
 }
 
+func TestSkipOrganizerPlanConflictsFiltersByActionID(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	targetRoot := filepath.Join(root, "library")
+	firstTarget := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p.mkv")
+	secondTarget := filepath.Join(targetRoot, "Inception (2010)", "Inception - 2160p.mkv")
+	if err := os.MkdirAll(filepath.Dir(firstTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(firstTarget, []byte("existing first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondTarget, []byte("existing second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Inception","year":2010},
+		"versions":[{"id":"v1","resolution":"1080p"},{"id":"v2","resolution":"2160p"}],
+		"files":[
+			{"id":"f1","media_id":"m1","version_id":"v1","path":"/downloads/Inception.1080p.mkv"},
+			{"id":"f2","media_id":"m1","version_id":"v2","path":"/downloads/Inception.2160p.mkv"}
+		],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","conflict_policy":"overwrite_with_confirmation","enabled":true}
+	}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+plan["id"].(string)+"/skip-conflicts?action_id=action-1", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 filtered skip conflicts, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["changed"].(float64) != 1 {
+		t.Fatalf("expected one filtered conflict change, got %#v", body)
+	}
+	updated := body["plan"].(map[string]any)
+	actions := updated["actions"].([]any)
+	first := actions[0].(map[string]any)
+	second := actions[1].(map[string]any)
+	if first["status"] != "skipped" || second["status"] != "conflict" {
+		t.Fatalf("expected only first conflict skipped, got %#v", actions)
+	}
+	summary := updated["summary"].(map[string]any)
+	if summary["skip_count"] != float64(1) || summary["conflict_count"] != float64(1) {
+		t.Fatalf("expected filtered conflict summary, got %#v", summary)
+	}
+}
+
 func TestRenameOrganizerPlanConflicts(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	root := t.TempDir()

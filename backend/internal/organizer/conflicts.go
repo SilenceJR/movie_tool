@@ -1,11 +1,41 @@
 package organizer
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
-func SkipConflicts(plan Plan, now time.Time) (Plan, int) {
+type ConflictFilter struct {
+	ActionIDs        []string
+	ActionType       ActionMode
+	ConflictReason   string
+	SourcePathPrefix string
+	TargetPathPrefix string
+}
+
+func (f ConflictFilter) Matches(action Action) bool {
+	if len(f.ActionIDs) > 0 && !containsString(f.ActionIDs, action.ID) {
+		return false
+	}
+	if f.ActionType != "" && action.ActionType != f.ActionType {
+		return false
+	}
+	if f.ConflictReason != "" && action.ConflictReason != f.ConflictReason {
+		return false
+	}
+	if f.SourcePathPrefix != "" && !strings.HasPrefix(action.SourcePath, f.SourcePathPrefix) {
+		return false
+	}
+	if f.TargetPathPrefix != "" && !strings.HasPrefix(action.TargetPath, f.TargetPathPrefix) {
+		return false
+	}
+	return true
+}
+
+func SkipConflicts(plan Plan, now time.Time, filter ConflictFilter) (Plan, int) {
 	changed := 0
 	for index, action := range plan.Actions {
-		if action.Status != ActionConflict {
+		if action.Status != ActionConflict || !filter.Matches(action) {
 			continue
 		}
 		action.Status = ActionSkipped
@@ -21,18 +51,18 @@ func SkipConflicts(plan Plan, now time.Time) (Plan, int) {
 	return plan, changed
 }
 
-func RenameConflicts(plan Plan, now time.Time, targetExists func(string) bool) (Plan, int) {
+func RenameConflicts(plan Plan, now time.Time, targetExists func(string) bool, filter ConflictFilter) (Plan, int) {
 	planner := Planner{TargetExists: targetExists}
 	seenTargets := make(map[string]string, len(plan.Actions))
 	for _, action := range plan.Actions {
-		if action.Status != ActionConflict {
+		if action.Status != ActionConflict || !filter.Matches(action) {
 			seenTargets[action.TargetPath] = action.SourcePath
 		}
 	}
 
 	changed := 0
 	for index, action := range plan.Actions {
-		if action.Status != ActionConflict {
+		if action.Status != ActionConflict || !filter.Matches(action) {
 			continue
 		}
 		action.TargetPath = planner.nextAvailableTarget(action.TargetPath, seenTargets)
@@ -51,10 +81,10 @@ func RenameConflicts(plan Plan, now time.Time, targetExists func(string) bool) (
 	return plan, changed
 }
 
-func ConfirmOverwriteConflicts(plan Plan, now time.Time) (Plan, int) {
+func ConfirmOverwriteConflicts(plan Plan, now time.Time, filter ConflictFilter) (Plan, int) {
 	changed := 0
 	for index, action := range plan.Actions {
-		if action.Status != ActionConflict || action.ConflictReason != ConflictReasonTargetPathExists {
+		if action.Status != ActionConflict || action.ConflictReason != ConflictReasonTargetPathExists || !filter.Matches(action) {
 			continue
 		}
 		action.Status = ActionPending
@@ -70,4 +100,13 @@ func ConfirmOverwriteConflicts(plan Plan, now time.Time) (Plan, int) {
 		plan.UpdatedAt = now.UTC()
 	}
 	return plan, changed
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

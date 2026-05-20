@@ -2117,6 +2117,48 @@ func TestRunDownloadDirectoryWatchSkipsWhenAlreadyRunning(t *testing.T) {
 	}
 }
 
+func TestRunDownloadDirectoryWatchDebouncesRecentRun(t *testing.T) {
+	root := t.TempDir()
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+	_ = createJSON(t, server, "/api/download-directories", `{
+		"name":"Watched",
+		"path":"`+root+`",
+		"library_id":"`+library["id"].(string)+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+
+	firstResponse := httptest.NewRecorder()
+	firstRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run?debounce_seconds=60", nil)
+	server.ServeHTTP(firstResponse, firstRequest)
+	if firstResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 first watch run, got %d body=%s", firstResponse.Code, firstResponse.Body.String())
+	}
+	var firstBody map[string]any
+	if err := json.NewDecoder(firstResponse.Body).Decode(&firstBody); err != nil {
+		t.Fatal(err)
+	}
+	if firstBody["skipped"] == true {
+		t.Fatalf("expected first watch run not to be debounced, got %#v", firstBody)
+	}
+
+	secondResponse := httptest.NewRecorder()
+	secondRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run?debounce_seconds=60", nil)
+	server.ServeHTTP(secondResponse, secondRequest)
+	if secondResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 debounced watch run, got %d body=%s", secondResponse.Code, secondResponse.Body.String())
+	}
+	var secondBody map[string]any
+	if err := json.NewDecoder(secondResponse.Body).Decode(&secondBody); err != nil {
+		t.Fatal(err)
+	}
+	if secondBody["skipped"] != true || !strings.Contains(secondBody["skip_reason"].(string), "debounce window") {
+		t.Fatalf("expected debounce skipped response, got %#v", secondBody)
+	}
+}
+
 func TestAutomationCRUDAndRun(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

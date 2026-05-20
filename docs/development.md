@@ -57,7 +57,7 @@ backend/internal/task         任务系统
 - 下载目录监听运行入口会只处理同时 `enabled` 和 `watch_enabled` 的目录，并复用单目录扫描、批量入库、失败隔离与可选整理计划生成逻辑；生产入口已启动后台轮询器，轮询间隔与稳定时间可通过环境变量配置，默认每 5 分钟触发一次，且跳过 2 分钟内仍在变化的文件。
 - 每次下载目录监听批次会生成 `download_watch` 父任务，记录扫描目录数量与失败摘要；具体目录扫描仍保留各自的 `library_scan` 子任务记录。
 - 下载目录监听响应已包含批次级 `summary`、总目录数、发现/入库/失败文件数、整理计划数、开始/完成时间与耗时；每个目录会给出 succeeded/failed、子任务、导入数量、失败数量和整理计划 ID，便于前端任务中心与自动化观测。
-- 下载目录监听批次已增加进程内去重保护；如果上一轮仍在运行，新的手动或后台触发会返回 skipped 状态，避免重复扫描与重复生成整理计划。
+- 下载目录监听批次已增加进程内去重保护；如果上一轮仍在运行，新的手动或后台触发会返回 skipped 状态，避免重复扫描与重复生成整理计划。手动触发可传 `debounce_seconds`，在上次完成时间仍位于去抖窗口内时直接返回 skipped，便于接入文件系统事件后抑制短时间重复扫描。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
 - 已有媒体文件解析器。
@@ -111,7 +111,7 @@ backend/internal/task         任务系统
 
 ```text
 1. 为下载目录监听增加失败重试和批量合并。
-2. 为下载目录监听增加事件去抖。
-3. 为 organizer 执行结果增加更细的失败恢复。
-4. 为批量 organizer plan 增加更细的冲突筛选与局部确认能力。
+2. 为 organizer 执行结果增加更细的失败恢复。
+3. 为批量 organizer plan 增加更细的冲突筛选与局部确认能力。
+4. 为下载目录监听接入真实文件系统事件源。
 ```

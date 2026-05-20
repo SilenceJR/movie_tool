@@ -31,22 +31,23 @@ import (
 )
 
 type Server struct {
-	cfg             config.Config
-	mux             *http.ServeMux
-	ai              ai.Store
-	automations     automation.Store
-	catalog         catalog.Store
-	downloads       download.Store
-	integrations    integration.Store
-	libraries       library.Store
-	localization    localization.Store
-	mediaFiles      media.Store
-	organizer       organizer.Store
-	scraper         scraper.Store
-	strm            strm.Store
-	tasks           *task.Queue
-	scanDB          transactionBeginner
-	downloadWatchMu sync.Mutex
+	cfg                          config.Config
+	mux                          *http.ServeMux
+	ai                           ai.Store
+	automations                  automation.Store
+	catalog                      catalog.Store
+	downloads                    download.Store
+	integrations                 integration.Store
+	libraries                    library.Store
+	localization                 localization.Store
+	mediaFiles                   media.Store
+	organizer                    organizer.Store
+	scraper                      scraper.Store
+	strm                         strm.Store
+	tasks                        *task.Queue
+	scanDB                       transactionBeginner
+	downloadWatchMu              sync.Mutex
+	lastDownloadWatchCompletedAt time.Time
 }
 
 type Dependencies struct {
@@ -915,6 +916,19 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 		}, nil
 	}
 	defer s.downloadWatchMu.Unlock()
+	if options.DebounceWindow > 0 && !s.lastDownloadWatchCompletedAt.IsZero() {
+		elapsed := startedAt.Sub(s.lastDownloadWatchCompletedAt)
+		if elapsed < options.DebounceWindow {
+			completedAt := time.Now().UTC()
+			return downloadDirectoryWatchRun{
+				Skipped:     true,
+				SkipReason:  fmt.Sprintf("download watch completed %s ago, within debounce window %s", elapsed.Round(time.Millisecond), options.DebounceWindow),
+				StartedAt:   startedAt,
+				CompletedAt: completedAt,
+				DurationMS:  completedAt.Sub(startedAt).Milliseconds(),
+			}, nil
+		}
+	}
 
 	directories, err := s.downloads.ListWatchEnabled(ctx)
 	if err != nil {
@@ -982,6 +996,7 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 		taskRecord = &completed
 	}
 	completedAt := time.Now().UTC()
+	s.lastDownloadWatchCompletedAt = completedAt
 	return downloadDirectoryWatchRun{
 		Task:                taskRecord,
 		DownloadDirectories: directories,
@@ -1003,6 +1018,7 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 
 type downloadScanOptions struct {
 	MinStableAge    time.Duration
+	DebounceWindow  time.Duration
 	BatchSize       int
 	ContinueOnError bool
 	OrganizerRuleID string
@@ -1073,6 +1089,13 @@ func parseDownloadScanOptions(r *http.Request) (downloadScanOptions, error) {
 	if err != nil {
 		return downloadScanOptions{}, err
 	}
+	debounceWindow, err := parseOptionalDurationSeconds(r.URL.Query().Get("debounce_seconds"))
+	if err != nil {
+		return downloadScanOptions{}, err
+	}
+	if debounceWindow < 0 {
+		return downloadScanOptions{}, fmt.Errorf("debounce_seconds cannot be negative")
+	}
 	batchSize, err := parseOptionalInt(r.URL.Query().Get("batch_size"))
 	if err != nil {
 		return downloadScanOptions{}, err
@@ -1089,6 +1112,7 @@ func parseDownloadScanOptions(r *http.Request) (downloadScanOptions, error) {
 	}
 	return downloadScanOptions{
 		MinStableAge:    minStableAge,
+		DebounceWindow:  debounceWindow,
 		BatchSize:       batchSize,
 		ContinueOnError: continueOnError,
 		OrganizerRuleID: strings.TrimSpace(r.URL.Query().Get("organizer_rule_id")),

@@ -18,6 +18,7 @@ Go Backend
         +-- Automation Scheduler
         +-- Scraper Providers
         +-- AI / Translation
+        +-- n8n Workflow Adapter
         +-- NFO / STRM Generator
         +-- Emby/Jellyfin/Plex Adapter
         |
@@ -26,6 +27,41 @@ SQLite / PostgreSQL
         |
         v
 Cache Directory / Media Directory
+
+本地 AI/RAG 目标：
+
+```text
+Movie Tool Backend
+        |
+        | OpenAI-compatible API
+        v
+oMLX(macOS) / Ollama(Windows NVIDIA)
+        |
+        +-- Embedding: 文本 -> 向量
+        +-- Chat: 搜索结果 -> 总结/问答
+        |
+        v
+Qdrant 单机向量库
+        |
+        v
+路径、chunk、媒体元数据 payload
+```
+
+后续可选 AI 工作流栈：
+
+```text
+Movie Tool Backend
+        |
+        | REST / webhook
+        v
+n8n + PostgreSQL
+        |
+        +-- 调用 oMLX / Ollama
+        +-- 调用 Qdrant
+        +-- 编排候选判断、翻译、标签规范化
+```
+
+详细边界与实施顺序见 [AI 工作流目标方案](ai-workflow-target.md)。
 ```
 
 ## 2. 后端模块
@@ -115,6 +151,8 @@ type Scraper interface {
 ### 2.8 ai
 
 负责 AI Provider 配置、模型调用、结构化输出校验。
+
+AI 模块继续承担 Provider 与模型调用抽象。当前优先接入 oMLX/Ollama + Qdrant 本地 RAG；复杂多步骤 AI 流程后续交给 n8n 编排，并通过 workflow adapter 回写候选判断、翻译、标签和简介结果。
 
 ### 2.9 translation
 

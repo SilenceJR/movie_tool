@@ -144,10 +144,17 @@ POST /api/ai/providers
 PATCH /api/ai/providers/{id}
 DELETE /api/ai/providers/{id}
 POST /api/ai/providers/{id}/test
+GET /api/ai/workflows
+POST /api/ai/workflows
+POST /api/ai/workflows/{id}/test
+POST /api/ai/workflows/{id}/run
+POST /api/ai/workflows/{id}/callback
 POST /api/media/{id}/ai/suggest-match
 POST /api/media/{id}/ai/translate
 POST /api/media/{id}/ai/normalize-tags
 ```
+
+AI 工作流目标采用 n8n 编排。后续 `/api/ai/workflows` 用于保存 n8n workflow 映射、base URL、webhook secret、默认输入模板和健康检查结果；`run` 创建 Movie Tool task 并记录 n8n execution ID，`callback` 负责验签后回写候选判断、翻译、标签规范化等结构化结果。
 
 ## 8. 翻译
 

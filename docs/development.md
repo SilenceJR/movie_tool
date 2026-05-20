@@ -70,6 +70,7 @@ backend/internal/task         任务系统
 - 下载目录监听批次已增加进程内去重保护；如果上一轮仍在运行，新的手动或后台触发会返回 skipped 状态，避免重复扫描与重复生成整理计划。手动触发可传 `debounce_seconds`，在上次完成时间仍位于去抖窗口内时直接返回 skipped，便于接入文件系统事件后抑制短时间重复扫描；也可传一个或多个 `directory_id` 只重跑指定监听目录，用于目录级失败重试；如果指定目录不存在或未启用监听，会返回 skipped，避免空批次被误判为成功重跑。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
+- 项目 AI 目标已调整为先跑通本地 RAG 闭环，再接 n8n 工作流编排；macOS 使用 oMLX，Windows + NVIDIA 使用 Ollama，Qdrant 统一保存向量和路径。已新增可选 Compose 扩展 `deployments/compose/docker-compose.ai.yml`、RAG 入库脚本 `scripts/local_rag_ingest.py` 和查询脚本 `scripts/local_rag_search.py`；详细方案见 `docs/ai-workflow-target.md`。
 - 已有媒体文件解析器。
 - 已有第一版数据库迁移 SQL。
 - 已有 migration runner 与 schema_migrations 记录逻辑。
@@ -122,8 +123,8 @@ backend/internal/task         任务系统
 ## 4. 下一步建议
 
 ```text
-1. 为下载目录监听增加批次触发合并策略，避免文件系统事件高频触发时生成过多小批次。
-2. 为 organizer 执行结果增加更多失败动作修复方式。
-3. 为下载目录监听接入真实文件系统事件源。
-4. 为下载目录监听接入真实文件系统事件源后的事件去抖与批次合并策略增加集成测试。
+1. 增加 AI/RAG 配置模型、健康检查和控制台展示，覆盖 oMLX/Ollama、Qdrant、collection 状态。
+2. 将 RAG 入库/查询能力接入后端任务系统，支持 media_text collection。
+3. 增加自然语言媒体搜索 API：问题 -> embedding -> Qdrant -> Qwen/Ollama 总结。
+4. 后续增加 run_n8n_workflow 自动化类型，并记录 n8n execution ID。
 ```

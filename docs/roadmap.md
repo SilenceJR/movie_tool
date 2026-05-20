@@ -34,6 +34,11 @@
 
 - AI Provider 配置。
 - OpenAI-compatible 调用。
+- 本地 RAG MVP：入库脚本、查询脚本、Qdrant collection 自动创建。
+- macOS oMLX 与 Windows/NVIDIA Ollama 的 OpenAI-compatible 接入约定。
+- Qdrant 单机向量库接入约定。
+- n8n self-hosted AI 工作流栈部署目标。
+- n8n workflow adapter、健康检查和回调验签。
 - AV 中文 fallback 翻译。
 - 翻译缓存。
 - AI 候选辅助判断。
@@ -71,6 +76,7 @@
 ## Phase 7: 稳定化
 
 - Docker Compose。
+- Movie Tool + Qdrant + n8n + Ollama/oMLX 的可选 Compose 部署档。
 - 备份与恢复。
 - 日志。
 - 权限。

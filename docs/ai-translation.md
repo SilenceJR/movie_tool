@@ -13,6 +13,8 @@ OpenAI-compatible
 自定义 HTTP Provider
 ```
 
+项目目标先采用本地 RAG 闭环：macOS 使用 oMLX，Windows + NVIDIA 使用 Ollama，二者都通过 OpenAI-compatible API 提供 embedding/chat；Qdrant 保存向量和路径。n8n self-hosted AI starter kit 作为第二阶段复杂工作流编排层。详见 [AI 工作流目标方案](ai-workflow-target.md)。
+
 配置项：
 
 ```text
@@ -34,6 +36,7 @@ enabled
 - 标签规范化。
 - 合集建议。
 - 简介生成或润色。
+- 通过 n8n workflow 编排多步骤候选判断、翻译、标签规范化和向量检索增强。
 
 ## 3. 隐私开关
 
@@ -102,4 +105,3 @@ AV 专用词典：
 ```
 
 重新翻译必须由用户明确触发。
-

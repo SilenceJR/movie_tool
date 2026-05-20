@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	_ "github.com/glebarez/go-sqlite"
 )
 
 type SQLiteOptions struct {

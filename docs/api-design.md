@@ -43,7 +43,7 @@ GET /api/download-directories/{id}
 PATCH /api/download-directories/{id}
 DELETE /api/download-directories/{id}
 POST /api/download-directories/{id}/scan
-POST /api/download-directories/watch/run
+POST /api/download-directories/watch/run?directory_id={downloadDirectoryId}
 POST /api/media-files/{id}/retry
 POST /api/media-files/retry-failed?library_id={libraryId}&limit={n}&path_prefix={path}&media_type={type}&failure_contains={text}&failed_after={rfc3339}&failed_before={rfc3339}
 POST /api/organizer/plans/{id}/rollback
@@ -64,7 +64,7 @@ POST /api/organizer/plans/{id}/rollback
 }
 ```
 
-`POST /api/download-directories/watch/run` 会返回批次观测字段：`summary`、`total_directories`、`total_discovered`、`total_imported`、`total_failed_files`、`organizer_plan_count`、`started_at`、`completed_at`、`duration_ms`。`summary` 中每个目录包含目录 ID/名称/path、`status`、子任务 ID、发现/导入/失败文件数、批次数、整理计划 ID；目录扫描失败时包含 HTTP 状态码与错误信息。触发时可传 `debounce_seconds`，如果距离上次成功进入扫描流程的完成时间仍在窗口内，会返回 `skipped=true` 和 `skip_reason`。
+`POST /api/download-directories/watch/run` 会返回批次观测字段：`summary`、`total_directories`、`total_discovered`、`total_imported`、`total_failed_files`、`organizer_plan_count`、`started_at`、`completed_at`、`duration_ms`。`summary` 中每个目录包含目录 ID/名称/path、`status`、子任务 ID、发现/导入/失败文件数、批次数、整理计划 ID；目录扫描失败时包含 HTTP 状态码与错误信息。触发时可传 `debounce_seconds`，如果距离上次成功进入扫描流程的完成时间仍在窗口内，会返回 `skipped=true` 和 `skip_reason`；也可传一个或多个 `directory_id` 只重跑指定监听目录。
 
 ## 5. 媒体
 

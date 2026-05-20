@@ -2312,6 +2312,63 @@ func TestRunDownloadDirectoryWatchReportsDirectoryFailures(t *testing.T) {
 	}
 }
 
+func TestRunDownloadDirectoryWatchFiltersByDirectoryID(t *testing.T) {
+	mediaRoot := t.TempDir()
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	firstPath := filepath.Join(firstRoot, "Arrival.2016.mkv")
+	secondPath := filepath.Join(secondRoot, "Dune.2021.mkv")
+	if err := os.WriteFile(firstPath, []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+mediaRoot+`"}`)
+	libraryID := library["id"].(string)
+	firstDir := createJSON(t, server, "/api/download-directories", `{
+		"name":"First",
+		"path":"`+firstRoot+`",
+		"library_id":"`+libraryID+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+	secondDir := createJSON(t, server, "/api/download-directories", `{
+		"name":"Second",
+		"path":"`+secondRoot+`",
+		"library_id":"`+libraryID+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run?directory_id="+url.QueryEscape(secondDir["id"].(string)), nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 filtered watch run, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["total_directories"] != float64(1) || body["total_imported"] != float64(1) {
+		t.Fatalf("expected one selected watch directory, got %#v", body)
+	}
+	directories := body["download_directories"].([]any)
+	if len(directories) != 1 || directories[0].(map[string]any)["id"] != secondDir["id"] {
+		t.Fatalf("expected only second directory, got %#v first=%#v", directories, firstDir)
+	}
+	results := body["results"].([]any)
+	imported := results[0].(map[string]any)["imported"].([]any)
+	if imported[0].(map[string]any)["path"] != secondPath {
+		t.Fatalf("expected second path imported, got %#v", imported)
+	}
+}
+
 func TestRunDownloadDirectoryWatchSkipsWhenAlreadyRunning(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	server.downloadWatchMu.Lock()

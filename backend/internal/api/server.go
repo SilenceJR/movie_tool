@@ -936,6 +936,7 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 	if err != nil {
 		return downloadDirectoryWatchRun{}, err
 	}
+	directories = filterDownloadDirectoriesByID(directories, options.DownloadDirectoryIDs)
 	var taskRecord *task.Task
 	if len(directories) > 0 {
 		created := s.tasks.Enqueue(task.TypeDownloadWatch, "run download directory watch")
@@ -1019,11 +1020,12 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 }
 
 type downloadScanOptions struct {
-	MinStableAge    time.Duration
-	DebounceWindow  time.Duration
-	BatchSize       int
-	ContinueOnError bool
-	OrganizerRuleID string
+	MinStableAge         time.Duration
+	DebounceWindow       time.Duration
+	BatchSize            int
+	ContinueOnError      bool
+	OrganizerRuleID      string
+	DownloadDirectoryIDs []string
 }
 
 type downloadDirectoryWatchRun struct {
@@ -1113,12 +1115,30 @@ func parseDownloadScanOptions(r *http.Request) (downloadScanOptions, error) {
 		}
 	}
 	return downloadScanOptions{
-		MinStableAge:    minStableAge,
-		DebounceWindow:  debounceWindow,
-		BatchSize:       batchSize,
-		ContinueOnError: continueOnError,
-		OrganizerRuleID: strings.TrimSpace(r.URL.Query().Get("organizer_rule_id")),
+		MinStableAge:         minStableAge,
+		DebounceWindow:       debounceWindow,
+		BatchSize:            batchSize,
+		ContinueOnError:      continueOnError,
+		OrganizerRuleID:      strings.TrimSpace(r.URL.Query().Get("organizer_rule_id")),
+		DownloadDirectoryIDs: splitQueryValues(r.URL.Query()["directory_id"]),
 	}, nil
+}
+
+func filterDownloadDirectoriesByID(directories []download.Directory, ids []string) []download.Directory {
+	if len(ids) == 0 {
+		return directories
+	}
+	selected := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		selected[id] = struct{}{}
+	}
+	filtered := make([]download.Directory, 0, len(directories))
+	for _, directory := range directories {
+		if _, ok := selected[directory.ID]; ok {
+			filtered = append(filtered, directory)
+		}
+	}
+	return filtered
 }
 
 func (s *Server) scanDownloadDirectory(ctx context.Context, directory download.Directory, options downloadScanOptions) (downloadDirectoryScanResult, int, error) {

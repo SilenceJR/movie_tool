@@ -86,8 +86,14 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if len(tasks) > 10 {
 		tasks = tasks[:10]
 	}
+	if tasks == nil {
+		tasks = []task.Task{}
+	}
 	if len(watchRuns) > 5 {
 		watchRuns = watchRuns[:5]
+	}
+	if watchRuns == nil {
+		watchRuns = []task.Task{}
 	}
 
 	counts := dashboardCounts{

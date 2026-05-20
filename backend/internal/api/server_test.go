@@ -54,8 +54,12 @@ func TestWebAppServedAtRoot(t *testing.T) {
 	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
 		t.Fatalf("expected html content type, got %q", contentType)
 	}
-	if !strings.Contains(response.Body.String(), "Movie Tool 控制台") {
+	body := response.Body.String()
+	if !strings.Contains(body, "Movie Tool 控制台") {
 		t.Fatalf("expected embedded web console, got %s", response.Body.String())
+	}
+	if !strings.Contains(body, "library-form") || !strings.Contains(body, "download-form") {
+		t.Fatalf("expected setup forms in web console, got %s", body)
 	}
 }
 

@@ -204,6 +204,11 @@
       align-items: start;
     }
 
+    .config-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-bottom: 12px;
+    }
+
     .panel {
       min-width: 0;
       overflow: hidden;
@@ -345,6 +350,84 @@
       font-size: 14px;
     }
 
+    .form {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .field input, .field select {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 10px;
+    }
+
+    .field input:focus, .field select:focus {
+      outline: 2px solid rgba(15, 118, 110, 0.18);
+      border-color: var(--accent);
+    }
+
+    .check-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .check-field input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+    }
+
+    .list {
+      display: grid;
+      gap: 8px;
+      padding: 0 14px 14px;
+    }
+
+    .list-item {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      background: #fbfcfc;
+      display: grid;
+      gap: 6px;
+    }
+
+    .list-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 13px;
+      font-weight: 680;
+    }
+
+    .list-meta {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+
     .error {
       color: var(--bad);
     }
@@ -359,6 +442,7 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
       }
       .metrics { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+      .config-grid { grid-template-columns: 1fr; }
       .sections { grid-template-columns: 1fr; }
     }
 
@@ -383,6 +467,7 @@
       <nav class="nav" aria-label="主导航">
         <a class="active" href="#overview"><span class="dot"></span>概览</a>
         <a href="#features"><span class="dot"></span>功能</a>
+        <a href="#setup"><span class="dot"></span>配置</a>
         <a href="#tasks"><span class="dot"></span>任务</a>
         <a href="#watch"><span class="dot"></span>监听</a>
         <a href="/api/dashboard" target="_blank"><span class="dot"></span>API</a>
@@ -415,6 +500,76 @@
         <div class="metric"><strong id="downloads">0</strong><span>下载目录</span></div>
         <div class="metric"><strong id="automations">0</strong><span>自动化</span></div>
         <div class="metric"><strong id="risks">0</strong><span>待处理风险</span></div>
+      </section>
+
+      <section class="grid config-grid" id="setup">
+        <article class="panel">
+          <div class="panel-header">
+            <h3>媒体库配置</h3>
+            <span id="library-count">0 个</span>
+          </div>
+          <form class="form" id="library-form">
+            <div class="field">
+              <label for="library-name">名称</label>
+              <input id="library-name" name="name" autocomplete="off" placeholder="Movies">
+            </div>
+            <div class="field">
+              <label for="library-path">媒体目录</label>
+              <input id="library-path" name="path" autocomplete="off" placeholder="/media/movies">
+            </div>
+            <div class="field">
+              <label for="library-type">类型</label>
+              <select id="library-type" name="media_type">
+                <option value="movie">电影</option>
+                <option value="tv">电视剧</option>
+                <option value="anime">动漫</option>
+                <option value="av">AV</option>
+              </select>
+            </div>
+            <label class="check-field">
+              <input type="checkbox" name="watch_enabled" checked>
+              <span>启用媒体库监听</span>
+            </label>
+            <button class="btn primary" type="submit">添加媒体库</button>
+          </form>
+          <div class="list" id="library-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h3>下载目录配置</h3>
+            <span id="download-count">0 个</span>
+          </div>
+          <form class="form" id="download-form">
+            <div class="field">
+              <label for="download-name">名称</label>
+              <input id="download-name" name="name" autocomplete="off" placeholder="Downloads">
+            </div>
+            <div class="field">
+              <label for="download-path">下载目录</label>
+              <input id="download-path" name="path" autocomplete="off" placeholder="/downloads/complete">
+            </div>
+            <div class="field">
+              <label for="download-library">目标媒体库</label>
+              <select id="download-library" name="library_id"></select>
+            </div>
+            <div class="field">
+              <label for="download-mode">整理方式</label>
+              <select id="download-mode" name="action_mode">
+                <option value="hardlink">硬链</option>
+                <option value="symlink">软链</option>
+                <option value="move">移动</option>
+                <option value="copy">复制</option>
+              </select>
+            </div>
+            <label class="check-field">
+              <input type="checkbox" name="watch_enabled" checked>
+              <span>纳入下载目录监听</span>
+            </label>
+            <button class="btn primary" type="submit">添加下载目录</button>
+          </form>
+          <div class="list" id="download-list"></div>
+        </article>
       </section>
 
       <section class="grid sections">
@@ -483,6 +638,13 @@
       downloads: document.querySelector('#downloads'),
       automations: document.querySelector('#automations'),
       risks: document.querySelector('#risks'),
+      libraryCount: document.querySelector('#library-count'),
+      libraryForm: document.querySelector('#library-form'),
+      libraryList: document.querySelector('#library-list'),
+      downloadCount: document.querySelector('#download-count'),
+      downloadForm: document.querySelector('#download-form'),
+      downloadLibrary: document.querySelector('#download-library'),
+      downloadList: document.querySelector('#download-list'),
       featureCount: document.querySelector('#feature-count'),
       featureList: document.querySelector('#feature-list'),
       taskCount: document.querySelector('#task-count'),
@@ -506,6 +668,14 @@
         throw new Error(message);
       }
       return response.json();
+    }
+
+    async function jsonRequest(path, payload) {
+      return request(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
     }
 
     function setStatus(message, failed = false) {
@@ -604,12 +774,51 @@
       }).join('') || '<div class="empty">暂无下载目录监听批次。</div>';
     }
 
+    function renderLibraries(items) {
+      els.libraryCount.textContent = `${items.length} 个`;
+      els.downloadLibrary.innerHTML = items.map(item => `
+        <option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} - ${escapeHtml(item.media_type)}</option>
+      `).join('');
+      els.downloadForm.querySelector('button[type="submit"]').disabled = items.length === 0;
+      els.libraryList.innerHTML = items.map(item => `
+        <section class="list-item">
+          <div class="list-title">
+            <span>${escapeHtml(item.name)}</span>
+            ${statusBadge(item.media_type)}
+          </div>
+          <div class="list-meta">${escapeHtml(item.path)}</div>
+          <div class="list-meta">NFO ${item.nfo_enabled ? '开启' : '关闭'} / STRM ${item.strm_enabled ? '开启' : '关闭'} / 监听 ${item.watch_enabled ? '开启' : '关闭'}</div>
+        </section>
+      `).join('') || '<div class="empty">还没有媒体库，先添加一个目标目录。</div>';
+    }
+
+    function renderDownloadDirectories(items, libraries) {
+      const libraryNames = new Map(libraries.map(item => [item.id, item.name]));
+      els.downloadCount.textContent = `${items.length} 个`;
+      els.downloadList.innerHTML = items.map(item => `
+        <section class="list-item">
+          <div class="list-title">
+            <span>${escapeHtml(item.name)}</span>
+            ${statusBadge(item.watch_enabled && item.enabled ? '监听中' : '停用')}
+          </div>
+          <div class="list-meta">${escapeHtml(item.path)}</div>
+          <div class="list-meta">目标：${escapeHtml(libraryNames.get(item.library_id) || item.library_id)} / ${escapeHtml(item.action_mode || 'hardlink')}</div>
+        </section>
+      `).join('') || '<div class="empty">还没有下载目录，可添加 BT/PT 完成目录。</div>';
+    }
+
     async function load() {
       try {
         setStatus('正在读取服务状态...');
-        const data = await request('/api/dashboard');
+        const [data, libraries, downloads] = await Promise.all([
+          request('/api/dashboard'),
+          request('/api/libraries'),
+          request('/api/download-directories')
+        ]);
         render(data);
-        setStatus('已连接服务，数据来自 /api/dashboard。');
+        renderLibraries(libraries);
+        renderDownloadDirectories(downloads, libraries);
+        setStatus('已连接服务，已同步 dashboard、媒体库和下载目录配置。');
       } catch (error) {
         setStatus(error.message, true);
       }
@@ -629,6 +838,59 @@
     els.refresh.addEventListener('click', load);
     els.runWatch.addEventListener('click', () => postAndRefresh('/api/download-directories/watch/run', '运行监听'));
     els.retryWatch.addEventListener('click', () => postAndRefresh('/api/download-directories/watch/retry-failed', '重试近期失败'));
+    els.libraryForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = new FormData(els.libraryForm);
+      const name = String(form.get('name') || '').trim();
+      const path = String(form.get('path') || '').trim();
+      if (!name || !path) {
+        setStatus('添加媒体库失败：名称和目录必填。', true);
+        return;
+      }
+      try {
+        setStatus('正在添加媒体库...');
+        await jsonRequest('/api/libraries', {
+          name,
+          path,
+          media_type: form.get('media_type'),
+          watch_enabled: form.get('watch_enabled') === 'on'
+        });
+        els.libraryForm.reset();
+        els.libraryForm.elements.watch_enabled.checked = true;
+        await load();
+        setStatus('媒体库已添加。');
+      } catch (error) {
+        setStatus(`添加媒体库失败：${error.message}`, true);
+      }
+    });
+    els.downloadForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = new FormData(els.downloadForm);
+      const name = String(form.get('name') || '').trim();
+      const path = String(form.get('path') || '').trim();
+      const libraryID = String(form.get('library_id') || '').trim();
+      if (!name || !path || !libraryID) {
+        setStatus('添加下载目录失败：名称、目录和目标媒体库必填。', true);
+        return;
+      }
+      try {
+        setStatus('正在添加下载目录...');
+        await jsonRequest('/api/download-directories', {
+          name,
+          path,
+          library_id: libraryID,
+          action_mode: form.get('action_mode'),
+          enabled: true,
+          watch_enabled: form.get('watch_enabled') === 'on'
+        });
+        els.downloadForm.reset();
+        els.downloadForm.elements.watch_enabled.checked = true;
+        await load();
+        setStatus('下载目录已添加。');
+      } catch (error) {
+        setStatus(`添加下载目录失败：${error.message}`, true);
+      }
+    });
     window.addEventListener('focus', load);
     load();
   </script>

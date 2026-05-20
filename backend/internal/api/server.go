@@ -207,6 +207,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/libraries/", s.handleDeleteLibrary)
 	s.mux.HandleFunc("GET /api/download-directories", s.handleListDownloadDirectories)
 	s.mux.HandleFunc("POST /api/download-directories", s.handleCreateDownloadDirectory)
+	s.mux.HandleFunc("POST /api/download-directories/watch/retry-failed", s.handleRetryRecentFailedDownloadDirectoryWatchRuns)
 	s.mux.HandleFunc("GET /api/download-directories/watch/runs", s.handleListDownloadDirectoryWatchRuns)
 	s.mux.HandleFunc("POST /api/download-directories/watch/runs/", s.handleDownloadDirectoryWatchRunAction)
 	s.mux.HandleFunc("POST /api/download-directories/watch/run", s.handleRunDownloadDirectoryWatch)
@@ -907,6 +908,49 @@ func (s *Server) handleRunDownloadDirectoryWatch(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusAccepted, result)
 }
 
+func (s *Server) handleRetryRecentFailedDownloadDirectoryWatchRuns(w http.ResponseWriter, r *http.Request) {
+	limit, err := parseOptionalInt(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if limit < 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("limit cannot be negative"))
+		return
+	}
+	if limit == 0 {
+		limit = 20
+	}
+	options, err := parseDownloadScanOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	runs := s.tasks.ListByQuery(task.Query{Type: task.TypeDownloadWatch})
+	runs = newestTasksFirst(runs)
+	if limit > 0 && limit < len(runs) {
+		runs = runs[:limit]
+	}
+	failedDirectoryIDs := s.unresolvedFailedDownloadWatchDirectoryIDs(runs)
+	if len(failedDirectoryIDs) == 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("recent download directory watch runs have no unresolved failed directories to retry"))
+		return
+	}
+	options.DownloadDirectoryIDs = failedDirectoryIDs
+	result, err := s.RunDownloadDirectoryWatch(r.Context(), options)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"inspected_run_count": len(runs),
+		"source_task_ids":     taskIDs(runs),
+		"retry_directory_ids": failedDirectoryIDs,
+		"retry_count":         len(failedDirectoryIDs),
+		"run":                 result,
+	})
+}
+
 func (s *Server) handleListDownloadDirectoryWatchRuns(w http.ResponseWriter, r *http.Request) {
 	limit, err := parseOptionalInt(r.URL.Query().Get("limit"))
 	if err != nil {
@@ -1039,6 +1083,32 @@ func failedDownloadWatchDirectoryIDs(summary []downloadDirectoryWatchSummary) []
 		}
 		seen[item.DownloadDirectoryID] = true
 		ids = append(ids, item.DownloadDirectoryID)
+	}
+	return ids
+}
+
+func (s *Server) unresolvedFailedDownloadWatchDirectoryIDs(runs []task.Task) []string {
+	seen := make(map[string]bool)
+	ids := make([]string, 0)
+	for _, run := range runs {
+		for _, item := range parseDownloadWatchSummaryLogs(s.tasks.Logs(run.ID)) {
+			id := strings.TrimSpace(item.DownloadDirectoryID)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			if item.Status == "failed" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+func taskIDs(tasks []task.Task) []string {
+	ids := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		ids = append(ids, task.ID)
 	}
 	return ids
 }

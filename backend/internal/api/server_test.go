@@ -2400,6 +2400,92 @@ func TestRetryFailedDownloadDirectoryWatchRun(t *testing.T) {
 	}
 }
 
+func TestRetryRecentFailedDownloadDirectoryWatchRunsMergesUnresolvedFailures(t *testing.T) {
+	mediaRoot := t.TempDir()
+	firstRoot := filepath.Join(t.TempDir(), "first")
+	secondRoot := filepath.Join(t.TempDir(), "second")
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+mediaRoot+`"}`)
+	createJSON(t, server, "/api/download-directories", `{
+		"name":"First missing",
+		"path":"`+firstRoot+`",
+		"library_id":"`+library["id"].(string)+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+	secondDirectory := createJSON(t, server, "/api/download-directories", `{
+		"name":"Second missing",
+		"path":"`+secondRoot+`",
+		"library_id":"`+library["id"].(string)+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+
+	firstResponse := httptest.NewRecorder()
+	firstRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run", nil)
+	server.ServeHTTP(firstResponse, firstRequest)
+	if firstResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 first watch run, got %d body=%s", firstResponse.Code, firstResponse.Body.String())
+	}
+	var firstBody map[string]any
+	if err := json.NewDecoder(firstResponse.Body).Decode(&firstBody); err != nil {
+		t.Fatal(err)
+	}
+	if firstBody["failure_count"] != float64(2) {
+		t.Fatalf("expected two initial failed directories, got %#v", firstBody)
+	}
+
+	if err := os.MkdirAll(firstRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(firstRoot, "Arrival.2016.mkv"), []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	secondResponse := httptest.NewRecorder()
+	secondRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run", nil)
+	server.ServeHTTP(secondResponse, secondRequest)
+	if secondResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 second watch run, got %d body=%s", secondResponse.Code, secondResponse.Body.String())
+	}
+	var secondBody map[string]any
+	if err := json.NewDecoder(secondResponse.Body).Decode(&secondBody); err != nil {
+		t.Fatal(err)
+	}
+	if secondBody["failure_count"] != float64(1) || secondBody["total_imported"] != float64(1) {
+		t.Fatalf("expected one resolved and one still failed directory, got %#v", secondBody)
+	}
+
+	if err := os.MkdirAll(secondRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secondRoot, "Dune.2021.mkv"), []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	retryResponse := httptest.NewRecorder()
+	retryRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/retry-failed?limit=2", nil)
+	server.ServeHTTP(retryResponse, retryRequest)
+	if retryResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 retry recent failed directories, got %d body=%s", retryResponse.Code, retryResponse.Body.String())
+	}
+	var retryBody map[string]any
+	if err := json.NewDecoder(retryResponse.Body).Decode(&retryBody); err != nil {
+		t.Fatal(err)
+	}
+	if retryBody["retry_count"] != float64(1) || retryBody["inspected_run_count"] != float64(2) {
+		t.Fatalf("expected one unresolved failure across recent runs, got %#v", retryBody)
+	}
+	retryIDs := retryBody["retry_directory_ids"].([]any)
+	if len(retryIDs) != 1 || retryIDs[0] != secondDirectory["id"] {
+		t.Fatalf("expected only second directory to retry, got %#v", retryIDs)
+	}
+	run := retryBody["run"].(map[string]any)
+	if run["total_directories"] != float64(1) || run["total_imported"] != float64(1) || run["failure_count"] != float64(0) {
+		t.Fatalf("expected retry to import only unresolved directory, got %#v", run)
+	}
+}
+
 func TestRunDownloadDirectoryWatchFiltersByDirectoryID(t *testing.T) {
 	mediaRoot := t.TempDir()
 	firstRoot := t.TempDir()

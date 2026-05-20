@@ -58,6 +58,7 @@ backend/internal/task         任务系统
 - 每次下载目录监听批次会生成 `download_watch` 父任务，记录扫描目录数量、目录级成功/失败摘要与失败原因；目录级摘要会以 `watch summary: {...}` 结构化 JSON 日志写入父任务，具体目录扫描仍保留各自的 `library_scan` 子任务记录。
 - `GET /api/download-directories/watch/runs` 可查询 `download_watch` 历史任务，支持 `status`、`limit` 与 `include_summary=true`；开启摘要时接口会直接返回从结构化任务日志解析出的目录级摘要，前端无需再自行解析日志。
 - `POST /api/download-directories/watch/runs/{taskId}/retry-failed` 可基于历史 `download_watch` 任务里的失败目录摘要，只重跑失败下载目录；修复目录路径、权限或临时 IO 问题后，不需要重新扫所有监听目录。
+- `POST /api/download-directories/watch/retry-failed` 可读取最近若干个 `download_watch` 批次，按最新状态合并仍未解决的失败目录并去重后统一重跑；默认检查最近 20 个批次，避免同一目录在多次失败日志里被重复重试。
 - 下载目录监听响应已包含批次级 `summary`、总目录数、发现/入库/失败文件数、整理计划数、开始/完成时间与耗时；每个目录会给出 succeeded/failed、子任务、导入数量、失败数量和整理计划 ID，便于前端任务中心与自动化观测。
 - 下载目录监听批次已增加进程内去重保护；如果上一轮仍在运行，新的手动或后台触发会返回 skipped 状态，避免重复扫描与重复生成整理计划。手动触发可传 `debounce_seconds`，在上次完成时间仍位于去抖窗口内时直接返回 skipped，便于接入文件系统事件后抑制短时间重复扫描；也可传一个或多个 `directory_id` 只重跑指定监听目录，用于目录级失败重试；如果指定目录不存在或未启用监听，会返回 skipped，避免空批次被误判为成功重跑。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
@@ -114,7 +115,7 @@ backend/internal/task         任务系统
 ## 4. 下一步建议
 
 ```text
-1. 为下载目录监听增加跨批次失败合并和批量合并策略。
+1. 为下载目录监听增加批次触发合并策略，避免文件系统事件高频触发时生成过多小批次。
 2. 为 organizer 执行结果增加更多失败动作修复方式。
 3. 为下载目录监听接入真实文件系统事件源。
 4. 为下载目录监听接入真实文件系统事件源后的事件去抖与批次合并策略增加集成测试。

@@ -235,6 +235,29 @@ func TestTMDBScraperRequiresAPIKey(t *testing.T) {
 	}
 }
 
+func TestParseAVScraperNumber(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/av/parse?filename=downloads/FC2-PPV-1234567.mp4", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 av parse, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	parsed := body["parsed"].(map[string]any)
+	if parsed["normalized"] != "FC2-PPV-1234567" || parsed["kind"] != "fc2" || body["persisted"] != false {
+		t.Fatalf("unexpected av parse response: %#v", body)
+	}
+	providers := parsed["preferred_providers"].([]any)
+	if providers[0] != "fc2" {
+		t.Fatalf("expected fc2 provider routing, got %#v", providers)
+	}
+}
+
 func TestCreateAndListLibraries(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

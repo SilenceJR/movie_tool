@@ -2494,11 +2494,11 @@ func (s *Server) handleListScrapers(w http.ResponseWriter, _ *http.Request) {
 			"purpose":     "电影/电视剧兜底元数据验证",
 		},
 		{
-			"provider":    "av",
-			"status":      "planned",
+			"provider":    scraper.AVProvider,
+			"status":      "parser_ready",
 			"configured":  false,
 			"media_types": []string{"av"},
-			"purpose":     "AV 番号元数据获取主线，按 JavDB/JavBus/FC2/MGStage/R18/Jav321 顺序验证",
+			"purpose":     "AV 番号解析和源路由已可验证，下一步按 JavDB/JavBus/FC2/MGStage/R18/Jav321 顺序接入真实抓取",
 		},
 		{
 			"provider":    "douban",
@@ -2517,6 +2517,14 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Errorf("scraper action not found"))
 		return
 	}
+	if provider == scraper.AVProvider {
+		if action == "parse" {
+			s.handleParseAVNumber(w, r)
+			return
+		}
+		writeError(w, http.StatusNotImplemented, fmt.Errorf("av scraper action %q is not implemented yet", action))
+		return
+	}
 	if provider != scraper.TMDBProvider {
 		writeError(w, http.StatusNotImplemented, fmt.Errorf("scraper provider %q is not implemented yet", provider))
 		return
@@ -2530,6 +2538,25 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusNotFound, fmt.Errorf("scraper action %q not found", action))
 	}
+}
+
+func (s *Server) handleParseAVNumber(w http.ResponseWriter, r *http.Request) {
+	value := firstNonEmpty(
+		r.URL.Query().Get("number"),
+		r.URL.Query().Get("title"),
+		r.URL.Query().Get("filename"),
+	)
+	parsed, ok := scraper.ParseAVNumber(value)
+	if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("av number could not be parsed"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":   scraper.AVProvider,
+		"media_type": "av",
+		"parsed":     parsed,
+		"persisted":  false,
+	})
 }
 
 func (s *Server) handleSearchScraper(w http.ResponseWriter, r *http.Request, client scraper.TMDBClient) {

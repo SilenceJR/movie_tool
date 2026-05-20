@@ -70,7 +70,7 @@ backend/internal/task         任务系统
 - 下载目录监听批次已增加进程内去重保护；如果上一轮仍在运行，新的手动或后台触发会返回 skipped 状态，避免重复扫描与重复生成整理计划。手动触发可传 `debounce_seconds`，在上次完成时间仍位于去抖窗口内时直接返回 skipped，便于接入文件系统事件后抑制短时间重复扫描；也可传一个或多个 `directory_id` 只重跑指定监听目录，用于目录级失败重试；如果指定目录不存在或未启用监听，会返回 skipped，避免空批次被误判为成功重跑。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
-- 已新增 live scraper 验证入口 `/api/scrapers`、`/api/scrapers/tmdb/search`、`/api/scrapers/tmdb/fetch`；TMDB 通过 `TMDB_API_KEY` 和可选 `TMDB_BASE_URL` 配置，电影/电视剧搜索与详情获取默认只验证远端数据和字段映射，不写入候选表。AV 源作为下一阶段主线，按番号源逐个验证可获取性后再接入持久化候选。
+- 已新增 live scraper 验证入口 `/api/scrapers`、`/api/scrapers/tmdb/search`、`/api/scrapers/tmdb/fetch` 与 `/api/scrapers/av/parse`；TMDB 通过 `TMDB_API_KEY` 和可选 `TMDB_BASE_URL` 配置，电影/电视剧搜索与详情获取默认只验证远端数据和字段映射，不写入候选表。AV 解析已支持标准番号、FC2、HEYZO、CARIB/1PONDO/10MUSUME 的归一化和推荐源路由，下一步按番号源逐个验证可获取性后再接入持久化候选。
 - 项目 AI 目标已调整为先跑通本地 RAG 闭环，再接 n8n 工作流编排；macOS 使用 oMLX，Windows + NVIDIA 使用 Ollama，Qdrant 统一保存向量和路径。已新增可选 Compose 扩展 `deployments/compose/docker-compose.ai.yml`、RAG 入库脚本 `scripts/local_rag_ingest.py`、查询脚本 `scripts/local_rag_search.py`、`GET /api/rag/config` 与 `GET /api/rag/health`；控制台已展示 RAG 模型服务、模型名、Qdrant 和 collection 配置。详细方案见 `docs/ai-workflow-target.md`。
 - 已有媒体文件解析器。
 - 已有第一版数据库迁移 SQL。
@@ -118,6 +118,7 @@ backend/internal/task         任务系统
 ### scraper
 
 - 已有 TMDB live provider，用于普通电影/电视剧兜底验证；`search` 会映射候选标题、原始标题、年份、简介和海报，`fetch` 会返回可应用的基础 metadata。
+- 已有 AV 番号解析器，用于 live scraper 前置路由；可归一化标准番号、FC2、HEYZO、CARIB/1PONDO/10MUSUME，并返回推荐 provider 顺序。
 - 已有轻量候选评分规则：番号精确匹配、标题相似度、年份匹配/冲突，并输出 0-100 分与原因。
 - 创建候选时，如果提供 `media_file_id` 且未提供完整分数，会读取已入库文件的 parsed title/year/number 自动评分。
 - 候选创建后会基于当前候选列表刷新未锁定作品的 `match_status`，人工选择候选后会应用标题、年份、简介、本地化元数据和 `external_ids`；空候选字段不会覆盖作品已有元数据。

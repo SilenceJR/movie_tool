@@ -25,7 +25,7 @@
 - Scraper 接口。
 - TMDB 电影/电视剧 live search/fetch 验证接口。
 - live scraper 结果显式保存为候选。
-- AV 番号解析。
+- AV 番号解析与源路由验证。
 - AV 基础刮削源逐个平台验证可获取性。
 - 候选评分。
 - 人工选择 API。

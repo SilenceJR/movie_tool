@@ -124,6 +124,7 @@ sort
 
 ```http
 GET /api/scrapers
+GET /api/scrapers/av/parse?number={number}
 GET /api/scrapers/{provider}/search?media_type={movie|tv|av}&title={title}&year={year}&number={number}&language={language}
 GET /api/scrapers/{provider}/fetch?media_type={movie|tv|av}&external_id={externalId}&language={language}
 ```
@@ -131,10 +132,11 @@ GET /api/scrapers/{provider}/fetch?media_type={movie|tv|av}&external_id={externa
 当前已实现：
 
 - `tmdb`：电影/电视剧兜底源，配置 `TMDB_API_KEY` 与可选 `TMDB_BASE_URL` 后可用；`search` 与 `fetch` 默认只返回验证结果，不写入候选表。
+- `av/parse`：AV 番号解析和源路由验证，支持标准番号、FC2、HEYZO、CARIB/1PONDO/10MUSUME 等基础格式；只返回归一化番号和推荐抓取源顺序，不写入候选表。
 
 规划中：
 
-- `av`：AV 番号元数据主线，按 JavDB/JavBus/FC2/MGStage/R18/Jav321 等源逐个验证可用性。
+- `av/search` 与 `av/fetch`：AV 番号元数据主线，按 JavDB/JavBus/FC2/MGStage/R18/Jav321 等源逐个验证可用性。
 - `douban`：中文电影/电视剧补充兜底。
 
 ```http

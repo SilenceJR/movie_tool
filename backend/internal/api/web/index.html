@@ -909,9 +909,31 @@
           </div>
           <div class="list-meta">${escapeHtml(item.external_id || '--')} / ${escapeHtml(item.year || '--')}</div>
           <div class="list-meta">${escapeHtml(item.overview || item.original_title || '--')}</div>
-          <button class="btn primary scraper-save" type="button" data-index="${index}">保存为候选</button>
+          ${renderScraperMetadata(item.metadata)}
+          <div class="actions">
+            <button class="btn scraper-fetch" type="button" data-index="${index}">拉取详情</button>
+            <button class="btn primary scraper-save" type="button" data-index="${index}">保存为候选</button>
+          </div>
         </section>
       `).join('') || '<div class="empty">没有搜索到候选。</div>';
+    }
+
+    function renderScraperMetadata(metadata) {
+      if (!metadata) return '';
+      const values = [
+        ['发行日', metadata.release_date],
+        ['年份', metadata.year],
+        ['时长', metadata.runtime_minutes ? `${metadata.runtime_minutes} 分钟` : ''],
+        ['片商', metadata.studio],
+        ['系列', metadata.series],
+        ['演员', (metadata.actors || []).join('、')],
+        ['标签', (metadata.tags || []).join('、')]
+      ].filter(([, value]) => value);
+      const summary = values.map(([label, value]) => `${label}：${value}`).join(' / ');
+      return `
+        <div class="list-meta">${escapeHtml(metadata.display_title || metadata.title || metadata.original_title || '--')}</div>
+        <div class="list-meta">${escapeHtml(summary || metadata.overview || '--')}</div>
+      `;
     }
 
     function renderSavedScraperCandidates(candidates) {
@@ -1023,9 +1045,10 @@
       }
     });
     els.scraperResults.addEventListener('click', async event => {
+      const fetchButton = event.target.closest('.scraper-fetch');
       const saveButton = event.target.closest('.scraper-save');
       const selectButton = event.target.closest('.scraper-select');
-      if (!saveButton && !selectButton) return;
+      if (!fetchButton && !saveButton && !selectButton) return;
       if (selectButton) {
         const candidateID = selectButton.dataset.id;
         const mediaID = selectButton.dataset.mediaId || scraperIDs().media_id;
@@ -1048,6 +1071,24 @@
           setStatus('候选已选择并锁定。');
         } catch (error) {
           setStatus(`选择候选失败：${error.message}`, true);
+        }
+        return;
+      }
+      if (fetchButton) {
+        const candidate = liveScraperCandidates[Number(fetchButton.dataset.index)];
+        if (!candidate || !candidate.external_id) {
+          setStatus('拉取详情失败：候选 external_id 为空。', true);
+          return;
+        }
+        const source = candidate.provider || els.scraperSource.value || 'javdb';
+        try {
+          setStatus(`正在拉取 ${scraperSourceName(source)} 详情...`);
+          const result = await request(`/api/scrapers/av/fetch?external_id=${encodeURIComponent(candidate.external_id)}&source=${encodeURIComponent(source)}`);
+          candidate.metadata = result.metadata || {};
+          renderScraperCandidates(liveScraperCandidates);
+          setStatus(`${scraperSourceName(source)} 详情拉取完成。`);
+        } catch (error) {
+          setStatus(`拉取详情失败：${error.message}`, true);
         }
         return;
       }

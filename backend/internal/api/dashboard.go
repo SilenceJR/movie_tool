@@ -155,7 +155,7 @@ func dashboardFeatures() []dashboardFeature {
 		{Name: "任务中心", Status: "已实现", Description: "任务、日志、取消与 retry 接口已持久化。"},
 		{Name: "自动化管理", Status: "已实现", Description: "自动化规则、运行历史和到期触发已接入 SQL store。"},
 		{Name: "刮削候选评分", Status: "已实现", Description: "候选可基于入库文件解析字段自动评分并刷新匹配状态。"},
-		{Name: "AV 刮削验证", Status: "已实现", Description: "控制台可解析番号、搜索 JavDB live 候选并显式保存到候选表。"},
+		{Name: "AV 刮削验证", Status: "已实现", Description: "控制台可解析番号、切换 JavDB/JavBus 搜索 live 候选、拉取详情并显式保存到候选表。"},
 		{Name: "文件整理", Status: "已实现", Description: "支持 dry-run、冲突处理、执行、失败修复和回滚。"},
 		{Name: "Web 控制台", Status: "本次新增", Description: "服务根路径直接展示当前能力、数据概况和近期任务。"},
 		{Name: "本地 RAG 配置", Status: "进行中", Description: "已暴露 oMLX/Ollama、Qdrant 与 collection 配置及健康检查接口。"},

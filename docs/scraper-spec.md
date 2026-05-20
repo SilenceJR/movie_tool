@@ -22,6 +22,7 @@ GET /api/scrapers/tmdb/fetch?media_type=movie&external_id=27205&language=zh-CN
 `av/parse` 已支持番号归一化和源路由验证，返回 `normalized`、`kind`、`prefix`、`digits`、`preferred_providers`，为后续逐平台 live search/fetch 提供稳定入口。
 `av/search` 与 `av/fetch` 已接入第一版 JavDB HTML 源解析，`JAVDB_BASE_URL` 默认 `https://javdb.com`；该实现用于验证搜索页/详情页可获取与字段映射，可返回发行日期、时长、演员、片商、系列、标签等结构化字段，默认不写入数据库。
 `source=javbus` 已接入第一版 JavBus HTML 源解析，`JAVBUS_BASE_URL` 默认 `https://www.javbus.com`；当前用于验证搜索页/详情页可获取和字段映射，默认不写入数据库。
+内置控制台的 AV 刮削验证面板已支持在 JavDB/JavBus 间切换数据源；搜索候选后可先拉取详情验证字段映射，再由用户显式保存为 `scrape_candidates`。
 `POST /api/scrapers/{provider}/candidates` 用于显式保存已经验证过的 live candidate，必须绑定 `media_id` 或 `media_file_id`，并复用现有候选评分和匹配状态刷新流程。
 
 ### 普通媒体

@@ -53,7 +53,7 @@ backend/internal/task         任务系统
 
 - 已有 HTTP server。
 - 已有 `/api/health`。
-- 已有随服务启动的内置 Web 控制台，根路径 `/` 和 `/ui` 可直接查看当前能力清单、数据概况、近期任务和下载目录监听批次；控制台数据来自 `/api/dashboard`，并已接入媒体库/下载目录快速创建、配置列表展示、AV 番号解析、JavDB/JavBus live 数据源切换搜索、候选显式保存、已保存候选加载和选择锁定。
+- 已有随服务启动的内置 Web 控制台，根路径 `/` 和 `/ui` 可直接查看当前能力清单、数据概况、近期任务和下载目录监听批次；控制台数据来自 `/api/dashboard`，并已接入媒体库/下载目录快速创建、配置列表展示、AV 番号解析、JavDB/JavBus live 数据源切换搜索、候选详情拉取验证、候选显式保存、已保存候选加载和选择锁定。
 - 已有 `/api/config`。
 - 已有 SQLite 驱动注册、数据库打开、连接 PRAGMA、embedded migration runner 启动集成。
 - 已有 `/api/libraries` CRUD；生产入口使用 SQL store，测试默认使用内存 store。

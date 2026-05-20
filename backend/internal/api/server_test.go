@@ -1305,6 +1305,56 @@ func TestSkipOrganizerPlanFailedActions(t *testing.T) {
 	}
 }
 
+func TestPreviewOrganizerFailuresDoesNotMutatePlan(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	source := filepath.Join(root, "downloads", "Missing.mkv")
+	targetRoot := filepath.Join(root, "library")
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Missing","year":2026},
+		"versions":[{"id":"v1","resolution":"1080p","source":"web-dl"}],
+		"files":[{"id":"f1","media_id":"m1","version_id":"v1","path":"`+source+`"}],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","enabled":true}
+	}`)
+	planID := plan["id"].(string)
+	executeResponse := httptest.NewRecorder()
+	executeRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/execute", nil)
+	server.ServeHTTP(executeResponse, executeRequest)
+	if executeResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 failed execute, got %d body=%s", executeResponse.Code, executeResponse.Body.String())
+	}
+
+	previewResponse := httptest.NewRecorder()
+	previewRequest := httptest.NewRequest(http.MethodGet, "/api/organizer/failures/preview?plan_id="+planID+"&action_id=action-1&error_contains="+url.QueryEscape("no such file"), nil)
+	server.ServeHTTP(previewResponse, previewRequest)
+	if previewResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 failure preview, got %d body=%s", previewResponse.Code, previewResponse.Body.String())
+	}
+	var previewBody map[string]any
+	if err := json.NewDecoder(previewResponse.Body).Decode(&previewBody); err != nil {
+		t.Fatal(err)
+	}
+	if previewBody["count"] != float64(1) || previewBody["total_failures"] != float64(1) {
+		t.Fatalf("expected one previewed failed action, got %#v", previewBody)
+	}
+
+	getResponse := httptest.NewRecorder()
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/organizer/plans/"+planID, nil)
+	server.ServeHTTP(getResponse, getRequest)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 get plan after failure preview, got %d body=%s", getResponse.Code, getResponse.Body.String())
+	}
+	var current map[string]any
+	if err := json.NewDecoder(getResponse.Body).Decode(&current); err != nil {
+		t.Fatal(err)
+	}
+	actions := current["actions"].([]any)
+	if actions[0].(map[string]any)["status"] != "failed" {
+		t.Fatalf("expected preview not to mutate failed action, got %#v", actions)
+	}
+}
+
 func TestOrganizerRulesAndPlanByRuleID(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

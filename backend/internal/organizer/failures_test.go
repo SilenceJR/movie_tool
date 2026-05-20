@@ -47,3 +47,19 @@ func TestSkipFailedActionsMarksPlanSucceededWhenNoFailuresRemain(t *testing.T) {
 		t.Fatalf("unexpected summary after repair: %+v", plan.Summary)
 	}
 }
+
+func TestPreviewFailedActionsAppliesFilter(t *testing.T) {
+	actions := PreviewFailedActions(Plan{
+		ID:     "plan-1",
+		Status: PlanFailed,
+		Actions: []Action{
+			{ID: "a1", ActionType: ActionCopy, TargetPath: "/library/a.mkv", Status: ActionFailed, Error: "permission denied"},
+			{ID: "a2", ActionType: ActionMove, TargetPath: "/library/b.mkv", Status: ActionFailed, Error: "disk full"},
+			{ID: "a3", ActionType: ActionCopy, TargetPath: "/library/c.mkv", Status: ActionSucceeded},
+		},
+	}, FailureFilter{ActionType: ActionCopy, ErrorContains: "permission"})
+
+	if len(actions) != 1 || actions[0].ID != "a1" {
+		t.Fatalf("expected filtered failed action preview, got %+v", actions)
+	}
+}

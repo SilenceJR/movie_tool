@@ -254,6 +254,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/organizer/rules/", s.handleDeleteOrganizerRule)
 	s.mux.HandleFunc("POST /api/organizer/plan", s.handleCreateOrganizerPlan)
 	s.mux.HandleFunc("GET /api/organizer/conflicts/preview", s.handlePreviewOrganizerConflicts)
+	s.mux.HandleFunc("GET /api/organizer/failures/preview", s.handlePreviewOrganizerFailures)
 	s.mux.HandleFunc("GET /api/organizer/plans/", s.handleGetOrganizerPlan)
 	s.mux.HandleFunc("POST /api/organizer/plans/", s.handleOrganizerPlanAction)
 	s.mux.HandleFunc("GET /api/organizer/actions", s.handleListOrganizerActions)
@@ -3047,6 +3048,32 @@ func (s *Server) handlePreviewOrganizerConflicts(w http.ResponseWriter, r *http.
 	})
 }
 
+func (s *Server) handlePreviewOrganizerFailures(w http.ResponseWriter, r *http.Request) {
+	planID := strings.TrimSpace(r.URL.Query().Get("plan_id"))
+	if planID == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("plan_id is required"))
+		return
+	}
+	plan, ok, err := s.organizer.GetPlan(r.Context(), planID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	filter := parseOrganizerFailureFilter(r)
+	actions := organizer.PreviewFailedActions(plan, filter)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plan_id":        plan.ID,
+		"operation":      "skip-failed",
+		"actions":        actions,
+		"count":          len(actions),
+		"total_failures": countOrganizerFailedActions(plan.Actions),
+	})
+}
+
 func (s *Server) handleOrganizerPlanAction(w http.ResponseWriter, r *http.Request) {
 	id, action, err := pathIDAction(r.URL.Path, "/api/organizer/plans/")
 	if err != nil {
@@ -3301,6 +3328,16 @@ func parseOrganizerFailureFilter(r *http.Request) organizer.FailureFilter {
 		SourcePathPrefix: strings.TrimSpace(query.Get("source_path_prefix")),
 		TargetPathPrefix: strings.TrimSpace(query.Get("target_path_prefix")),
 	}
+}
+
+func countOrganizerFailedActions(actions []organizer.Action) int {
+	count := 0
+	for _, action := range actions {
+		if action.Status == organizer.ActionFailed {
+			count++
+		}
+	}
+	return count
 }
 
 func splitQueryValues(values []string) []string {

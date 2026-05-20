@@ -52,6 +52,16 @@ func SkipFailedActions(plan Plan, now time.Time, filter FailureFilter) (Plan, in
 	return plan, changed
 }
 
+func PreviewFailedActions(plan Plan, filter FailureFilter) []Action {
+	actions := make([]Action, 0)
+	for _, action := range plan.Actions {
+		if action.Status == ActionFailed && filter.Matches(action) {
+			actions = append(actions, action)
+		}
+	}
+	return actions
+}
+
 func statusAfterManualFailureRepair(actions []Action) PlanStatus {
 	for _, action := range actions {
 		switch action.Status {

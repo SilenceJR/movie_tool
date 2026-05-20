@@ -64,7 +64,7 @@ func TestWebAppServedAtRoot(t *testing.T) {
 }
 
 func TestDashboardSummary(t *testing.T) {
-	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0", RAGOpenAIBaseURL: "http://localhost:8000/v1", RAGQdrantURL: "http://localhost:6333", RAGCollection: "local_files"})
 	createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+t.TempDir()+`"}`)
 	server.tasks.Enqueue(task.TypeLibraryScan, "scan movies")
 
@@ -88,6 +88,41 @@ func TestDashboardSummary(t *testing.T) {
 	}
 	if len(body["recent_tasks"].([]any)) != 1 {
 		t.Fatalf("expected one recent task, got %#v", body["recent_tasks"])
+	}
+	rag := body["rag"].(map[string]any)
+	if rag["platform_hint"] != "macos_omlx" || rag["collection"] != "local_files" {
+		t.Fatalf("expected RAG dashboard config, got %#v", rag)
+	}
+}
+
+func TestRAGConfig(t *testing.T) {
+	server := NewServer(config.Config{
+		Host:              "127.0.0.1",
+		Port:              "0",
+		RAGOpenAIBaseURL:  "http://localhost:11434/v1",
+		RAGOpenAIAPIKey:   "secret",
+		RAGEmbeddingModel: "nomic-embed-text",
+		RAGChatModel:      "qwen2.5:7b",
+		RAGQdrantURL:      "http://localhost:6333",
+		RAGCollection:     "media_text",
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/rag/config", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 rag config, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["openai_base_url"] != "http://localhost:11434/v1" || body["platform_hint"] != "windows_nvidia_ollama" {
+		t.Fatalf("expected ollama RAG config, got %#v", body)
+	}
+	if body["has_api_key"] != true || body["api_key"] != nil {
+		t.Fatalf("expected API key to be redacted, got %#v", body)
 	}
 }
 

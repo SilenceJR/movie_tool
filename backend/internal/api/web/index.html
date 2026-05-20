@@ -505,6 +505,14 @@
       <section class="grid config-grid" id="setup">
         <article class="panel">
           <div class="panel-header">
+            <h3>本地 RAG</h3>
+            <span id="rag-platform">--</span>
+          </div>
+          <div class="list" id="rag-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
             <h3>媒体库配置</h3>
             <span id="library-count">0 个</span>
           </div>
@@ -645,6 +653,8 @@
       downloadForm: document.querySelector('#download-form'),
       downloadLibrary: document.querySelector('#download-library'),
       downloadList: document.querySelector('#download-list'),
+      ragPlatform: document.querySelector('#rag-platform'),
+      ragList: document.querySelector('#rag-list'),
       featureCount: document.querySelector('#feature-count'),
       featureList: document.querySelector('#feature-list'),
       taskCount: document.querySelector('#task-count'),
@@ -772,6 +782,27 @@
           </section>
         `;
       }).join('') || '<div class="empty">暂无下载目录监听批次。</div>';
+      renderRAG(data.rag || {});
+    }
+
+    function renderRAG(rag) {
+      els.ragPlatform.textContent = rag.platform_hint || '--';
+      const rows = [
+        ['模型服务', rag.openai_base_url || '--'],
+        ['Embedding', rag.embedding_model || '--'],
+        ['Chat', rag.chat_model || '--'],
+        ['Qdrant', rag.qdrant_url || '--'],
+        ['Collection', rag.collection || '--'],
+        ['API Key', rag.has_api_key ? '已配置' : '未配置']
+      ];
+      els.ragList.innerHTML = rows.map(([name, value]) => `
+        <section class="list-item">
+          <div class="list-title">
+            <span>${escapeHtml(name)}</span>
+          </div>
+          <div class="list-meta">${escapeHtml(value)}</div>
+        </section>
+      `).join('');
     }
 
     function renderLibraries(items) {

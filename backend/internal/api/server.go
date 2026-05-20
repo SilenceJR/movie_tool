@@ -191,6 +191,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/dashboard", s.handleDashboard)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
+	s.mux.HandleFunc("GET /api/rag/config", s.handleRAGConfig)
+	s.mux.HandleFunc("GET /api/rag/health", s.handleRAGHealth)
 	s.mux.HandleFunc("GET /api/integrations", s.handleListIntegrations)
 	s.mux.HandleFunc("POST /api/integrations", s.handleCreateIntegration)
 	s.mux.HandleFunc("GET /api/integrations/", s.handleGetIntegration)

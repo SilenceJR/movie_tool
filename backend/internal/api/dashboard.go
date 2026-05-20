@@ -12,6 +12,7 @@ import (
 type dashboardResponse struct {
 	Counts          dashboardCounts                   `json:"counts"`
 	Features        []dashboardFeature                `json:"features"`
+	RAG             ragConfigResponse                 `json:"rag"`
 	RecentTasks     []task.Task                       `json:"recent_tasks"`
 	RecentWatchRuns []downloadDirectoryWatchRunDetail `json:"recent_watch_runs"`
 }
@@ -138,6 +139,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dashboardResponse{
 		Counts:          counts,
 		Features:        dashboardFeatures(),
+		RAG:             s.ragConfigResponse(),
 		RecentTasks:     tasks,
 		RecentWatchRuns: s.downloadWatchRunDetails(watchRuns),
 	})
@@ -155,5 +157,6 @@ func dashboardFeatures() []dashboardFeature {
 		{Name: "刮削候选评分", Status: "已实现", Description: "候选可基于入库文件解析字段自动评分并刷新匹配状态。"},
 		{Name: "文件整理", Status: "已实现", Description: "支持 dry-run、冲突处理、执行、失败修复和回滚。"},
 		{Name: "Web 控制台", Status: "本次新增", Description: "服务根路径直接展示当前能力、数据概况和近期任务。"},
+		{Name: "本地 RAG 配置", Status: "进行中", Description: "已暴露 oMLX/Ollama、Qdrant 与 collection 配置及健康检查接口。"},
 	}
 }

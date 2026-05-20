@@ -14,6 +14,12 @@ type Config struct {
 	PublicURL                 string
 	DownloadWatchInterval     time.Duration
 	DownloadWatchMinStableAge time.Duration
+	RAGOpenAIBaseURL          string
+	RAGOpenAIAPIKey           string
+	RAGEmbeddingModel         string
+	RAGChatModel              string
+	RAGQdrantURL              string
+	RAGCollection             string
 }
 
 func Load() Config {
@@ -26,6 +32,12 @@ func Load() Config {
 		PublicURL:                 env("MOVIE_TOOL_PUBLIC_URL", ""),
 		DownloadWatchInterval:     envDuration("MOVIE_TOOL_DOWNLOAD_WATCH_INTERVAL", 5*time.Minute),
 		DownloadWatchMinStableAge: envDuration("MOVIE_TOOL_DOWNLOAD_WATCH_MIN_STABLE_AGE", 2*time.Minute),
+		RAGOpenAIBaseURL:          env("RAG_OPENAI_BASE_URL", env("OMLX_URL", "http://localhost:8000/v1")),
+		RAGOpenAIAPIKey:           env("RAG_OPENAI_API_KEY", env("OMLX_API_KEY", "")),
+		RAGEmbeddingModel:         env("RAG_EMBEDDING_MODEL", "Qwen3-Embedding-4B-4bit-DWQ"),
+		RAGChatModel:              env("RAG_CHAT_MODEL", "Qwen3.5-4B-MLX-4bit"),
+		RAGQdrantURL:              env("QDRANT_URL", "http://localhost:6333"),
+		RAGCollection:             env("RAG_COLLECTION", "local_files"),
 	}
 }
 

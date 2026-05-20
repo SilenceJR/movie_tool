@@ -25,9 +25,12 @@
 GET /api/health
 GET /api/config
 GET /api/dashboard
+GET /api/rag/config
+GET /api/rag/health
 ```
 
 `GET /api/dashboard` 为内置 Web 控制台提供汇总数据，包含媒体库、媒体条目、媒体文件、下载目录、自动化、任务风险计数、已实现能力清单、近期任务和最近下载目录监听批次摘要。
+`GET /api/rag/config` 返回本地 RAG 配置，隐藏 API key，仅展示是否已配置；`GET /api/rag/health` 会探测 OpenAI-compatible 模型服务 `/models`、Qdrant `/collections` 与当前 collection。
 
 ## 3. 媒体库
 

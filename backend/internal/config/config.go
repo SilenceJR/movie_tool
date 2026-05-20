@@ -22,6 +22,7 @@ type Config struct {
 	RAGCollection             string
 	TMDBBaseURL               string
 	TMDBAPIKey                string
+	JavDBBaseURL              string
 }
 
 func Load() Config {
@@ -42,6 +43,7 @@ func Load() Config {
 		RAGCollection:             env("RAG_COLLECTION", "local_files"),
 		TMDBBaseURL:               env("TMDB_BASE_URL", "https://api.themoviedb.org"),
 		TMDBAPIKey:                env("TMDB_API_KEY", ""),
+		JavDBBaseURL:              env("JAVDB_BASE_URL", "https://javdb.com"),
 	}
 }
 

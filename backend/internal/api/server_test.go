@@ -258,6 +258,69 @@ func TestParseAVScraperNumber(t *testing.T) {
 	}
 }
 
+func TestSearchAVScraperUsesJavDB(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/search" || r.URL.Query().Get("q") != "SSNI-00123" {
+			t.Fatalf("unexpected javdb search request %s", r.URL.String())
+		}
+		return jsonResponse(`
+			<a class="box" href="/v/javdb-id">
+				<img src="/covers/ssni.jpg">
+				<div class="video-title">SSNI-00123 Example Title</div>
+				<div class="meta">2020-02-03</div>
+			</a>
+		`), nil
+	})}
+	server := NewServerWithDependencies(config.Config{Host: "127.0.0.1", Port: "0", JavDBBaseURL: "https://javdb.test"}, Dependencies{ScraperHTTP: client})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/av/search?number=ssni00123", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 av search, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["provider"] != "av" || body["source"] != "javdb" || body["count"] != float64(1) || body["persisted"] != false {
+		t.Fatalf("unexpected av search response: %#v", body)
+	}
+	candidate := body["candidates"].([]any)[0].(map[string]any)
+	if candidate["external_id"] != "javdb:/v/javdb-id" || candidate["year"] != float64(2020) {
+		t.Fatalf("unexpected javdb candidate: %#v", candidate)
+	}
+}
+
+func TestFetchAVScraperUsesJavDB(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v/javdb-id" {
+			t.Fatalf("unexpected javdb fetch request %s", r.URL.String())
+		}
+		return jsonResponse(`
+			<h2>SSNI-00123 Example Title</h2>
+			<div class="release-date">2020-02-03</div>
+			<div class="description">Example overview</div>
+		`), nil
+	})}
+	server := NewServerWithDependencies(config.Config{Host: "127.0.0.1", Port: "0", JavDBBaseURL: "https://javdb.test"}, Dependencies{ScraperHTTP: client})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/av/fetch?external_id=javdb:/v/javdb-id", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 av fetch, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	metadata := body["metadata"].(map[string]any)
+	if metadata["provider"] != "javdb" || metadata["title"] != "SSNI-00123" || metadata["year"] != float64(2020) {
+		t.Fatalf("unexpected javdb metadata: %#v", metadata)
+	}
+}
+
 func TestCreateAndListLibraries(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

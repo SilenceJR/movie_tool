@@ -2495,10 +2495,10 @@ func (s *Server) handleListScrapers(w http.ResponseWriter, _ *http.Request) {
 		},
 		{
 			"provider":    scraper.AVProvider,
-			"status":      "parser_ready",
-			"configured":  false,
+			"status":      "javdb_live",
+			"configured":  true,
 			"media_types": []string{"av"},
-			"purpose":     "AV 番号解析和源路由已可验证，下一步按 JavDB/JavBus/FC2/MGStage/R18/Jav321 顺序接入真实抓取",
+			"purpose":     "AV 番号解析和 JavDB search/fetch 已可验证，后续按 JavBus/FC2/MGStage/R18/Jav321 顺序扩展",
 		},
 		{
 			"provider":    "douban",
@@ -2518,11 +2518,27 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if provider == scraper.AVProvider {
-		if action == "parse" {
+		switch action {
+		case "parse":
 			s.handleParseAVNumber(w, r)
-			return
+		case "search":
+			s.handleSearchAVScraper(w, r)
+		case "fetch":
+			s.handleFetchAVScraper(w, r)
+		default:
+			writeError(w, http.StatusNotImplemented, fmt.Errorf("av scraper action %q is not implemented yet", action))
 		}
-		writeError(w, http.StatusNotImplemented, fmt.Errorf("av scraper action %q is not implemented yet", action))
+		return
+	}
+	if provider == scraper.JavDBProvider {
+		switch action {
+		case "search":
+			s.handleSearchJavDBScraper(w, r)
+		case "fetch":
+			s.handleFetchJavDBScraper(w, r)
+		default:
+			writeError(w, http.StatusNotFound, fmt.Errorf("scraper action %q not found", action))
+		}
 		return
 	}
 	if provider != scraper.TMDBProvider {
@@ -2537,6 +2553,69 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 		s.handleFetchScraper(w, r, s.tmdbClient())
 	default:
 		writeError(w, http.StatusNotFound, fmt.Errorf("scraper action %q not found", action))
+	}
+}
+
+func (s *Server) handleSearchAVScraper(w http.ResponseWriter, r *http.Request) {
+	source := strings.ToLower(firstNonEmpty(r.URL.Query().Get("source"), scraper.JavDBProvider))
+	switch source {
+	case scraper.JavDBProvider:
+		s.handleSearchJavDBScraper(w, r)
+	default:
+		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
+	}
+}
+
+func (s *Server) handleFetchAVScraper(w http.ResponseWriter, r *http.Request) {
+	source := strings.ToLower(firstNonEmpty(r.URL.Query().Get("source"), scraper.JavDBProvider))
+	switch source {
+	case scraper.JavDBProvider:
+		s.handleFetchJavDBScraper(w, r)
+	default:
+		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
+	}
+}
+
+func (s *Server) handleSearchJavDBScraper(w http.ResponseWriter, r *http.Request) {
+	query := scraper.SearchQuery{
+		MediaType: "av",
+		Title:     r.URL.Query().Get("title"),
+		Number:    r.URL.Query().Get("number"),
+		Language:  r.URL.Query().Get("language"),
+	}
+	candidates, err := s.javdbClient().Search(r.Context(), query)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":   scraper.AVProvider,
+		"source":     scraper.JavDBProvider,
+		"media_type": "av",
+		"persisted":  false,
+		"count":      len(candidates),
+		"candidates": candidates,
+	})
+}
+
+func (s *Server) handleFetchJavDBScraper(w http.ResponseWriter, r *http.Request) {
+	metadata, err := s.javdbClient().FetchByID(r.Context(), r.URL.Query().Get("external_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":   scraper.AVProvider,
+		"source":     scraper.JavDBProvider,
+		"media_type": "av",
+		"metadata":   metadata,
+	})
+}
+
+func (s *Server) javdbClient() scraper.JavDBClient {
+	return scraper.JavDBClient{
+		BaseURL:    s.cfg.JavDBBaseURL,
+		HTTPClient: s.scraperHTTPClient,
 	}
 }
 

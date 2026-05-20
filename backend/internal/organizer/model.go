@@ -33,11 +33,12 @@ const (
 type ActionStatus string
 
 const (
-	ActionPending   ActionStatus = "pending"
-	ActionSkipped   ActionStatus = "skipped"
-	ActionSucceeded ActionStatus = "succeeded"
-	ActionFailed    ActionStatus = "failed"
-	ActionConflict  ActionStatus = "conflict"
+	ActionPending    ActionStatus = "pending"
+	ActionSkipped    ActionStatus = "skipped"
+	ActionSucceeded  ActionStatus = "succeeded"
+	ActionFailed     ActionStatus = "failed"
+	ActionConflict   ActionStatus = "conflict"
+	ActionRolledBack ActionStatus = "rolled_back"
 )
 
 type Rule struct {

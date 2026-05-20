@@ -46,6 +46,7 @@ POST /api/download-directories/{id}/scan
 POST /api/download-directories/watch/run
 POST /api/media-files/{id}/retry
 POST /api/media-files/retry-failed?library_id={libraryId}&limit={n}
+POST /api/organizer/plans/{id}/rollback
 ```
 
 创建下载目录示例：

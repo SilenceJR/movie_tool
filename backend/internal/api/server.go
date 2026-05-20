@@ -2904,6 +2904,8 @@ func (s *Server) handleOrganizerPlanAction(w http.ResponseWriter, r *http.Reques
 		s.handleExecuteOrganizerPlan(w, r, id)
 	case "retry":
 		s.handleRetryOrganizerPlan(w, r, id)
+	case "rollback":
+		s.handleRollbackOrganizerPlan(w, r, id)
 	case "skip-conflicts":
 		s.handleSkipOrganizerPlanConflicts(w, r, id)
 	case "rename-conflicts":
@@ -2968,6 +2970,32 @@ func (s *Server) handleRetryOrganizerPlan(w http.ResponseWriter, r *http.Request
 		"task":      taskRecord,
 		"plan":      saved,
 		"retryable": retryable,
+	})
+}
+
+func (s *Server) handleRollbackOrganizerPlan(w http.ResponseWriter, r *http.Request, id string) {
+	plan, ok, err := s.organizer.GetPlan(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	if plan.Status != organizer.PlanSucceeded && plan.Status != organizer.PlanFailed {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan cannot be rolled back from status %q", plan.Status))
+		return
+	}
+	taskRecord, saved, rolledBack, err := s.rollbackOrganizerPlan(r.Context(), plan)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task":        taskRecord,
+		"plan":        saved,
+		"rolled_back": rolledBack,
 	})
 }
 
@@ -3069,6 +3097,88 @@ func (s *Server) executeOrganizerPlan(ctx context.Context, plan organizer.Plan, 
 		taskRecord, _ = s.tasks.Succeed(taskRecord.ID, message)
 	}
 	return taskRecord, saved, nil
+}
+
+func (s *Server) rollbackOrganizerPlan(ctx context.Context, plan organizer.Plan) (task.Task, organizer.Plan, int, error) {
+	taskRecord := s.tasks.Enqueue(task.TypeOrganizeFiles, "rollback organizer plan: "+plan.ID)
+	taskRecord, _ = s.tasks.Start(taskRecord.ID)
+
+	rolledBack := 0
+	now := time.Now().UTC()
+	for index := len(plan.Actions) - 1; index >= 0; index-- {
+		if err := ctx.Err(); err != nil {
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+			return taskRecord, organizer.Plan{}, rolledBack, err
+		}
+		action := plan.Actions[index]
+		if action.Status != organizer.ActionSucceeded {
+			continue
+		}
+		if err := rollbackOrganizerAction(action); err != nil {
+			plan.Actions[index].Status = organizer.ActionFailed
+			plan.Actions[index].Error = "rollback: " + err.Error()
+			plan.Status = organizer.PlanFailed
+			plan.UpdatedAt = now
+			saved, updateErr := s.organizer.UpdatePlan(ctx, plan)
+			if updateErr != nil {
+				taskRecord, _ = s.tasks.Fail(taskRecord.ID, updateErr)
+				return taskRecord, organizer.Plan{}, rolledBack, updateErr
+			}
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+			return taskRecord, saved, rolledBack, nil
+		}
+		if action.MediaFileID != "" {
+			if _, ok, err := s.mediaFiles.UpdateFilePath(ctx, action.MediaFileID, action.SourcePath); err != nil {
+				plan.Actions[index].Status = organizer.ActionFailed
+				plan.Actions[index].Error = "rollback media file path: " + err.Error()
+				plan.Status = organizer.PlanFailed
+				plan.UpdatedAt = now
+				saved, updateErr := s.organizer.UpdatePlan(ctx, plan)
+				if updateErr != nil {
+					taskRecord, _ = s.tasks.Fail(taskRecord.ID, updateErr)
+					return taskRecord, organizer.Plan{}, rolledBack, updateErr
+				}
+				taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+				return taskRecord, saved, rolledBack, nil
+			} else if !ok {
+				s.tasks.Log(taskRecord.ID, task.LogLevelWarn, "media file not found for rollback path update: "+action.MediaFileID)
+			}
+		}
+		plan.Actions[index].Status = organizer.ActionRolledBack
+		plan.Actions[index].Error = ""
+		plan.Actions[index].ExecutedAt = &now
+		rolledBack++
+		s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf("rollback %s -> %s: %s", action.TargetPath, action.SourcePath, organizer.ActionRolledBack))
+	}
+	if rolledBack == 0 {
+		err := fmt.Errorf("organizer plan has no succeeded actions to roll back")
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+		return taskRecord, plan, 0, nil
+	}
+	plan.Status = organizer.PlanCanceled
+	plan.Summary = organizer.SummarizeActions(plan.Actions)
+	plan.UpdatedAt = now
+	saved, err := s.organizer.UpdatePlan(ctx, plan)
+	if err != nil {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+		return taskRecord, organizer.Plan{}, rolledBack, err
+	}
+	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, "rollback organizer plan: "+plan.ID)
+	return taskRecord, saved, rolledBack, nil
+}
+
+func rollbackOrganizerAction(action organizer.Action) error {
+	switch action.ActionType {
+	case organizer.ActionMove:
+		if err := os.MkdirAll(filepath.Dir(action.SourcePath), 0o755); err != nil {
+			return err
+		}
+		return os.Rename(action.TargetPath, action.SourcePath)
+	case organizer.ActionCopy, organizer.ActionHardlink, organizer.ActionSymlink:
+		return os.Remove(action.TargetPath)
+	default:
+		return fmt.Errorf("unsupported organizer action %q", action.ActionType)
+	}
 }
 
 func (s *Server) handleCancelOrganizerPlan(w http.ResponseWriter, r *http.Request, id string) {

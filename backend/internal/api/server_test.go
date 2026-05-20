@@ -940,6 +940,77 @@ func TestExecuteOrganizerPlan(t *testing.T) {
 	}
 }
 
+func TestRollbackOrganizerPlan(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	source := filepath.Join(root, "downloads", "Arrival.mkv")
+	targetRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mediaFile, err := server.mediaFiles.UpsertFile(context.Background(), media.FileInput{
+		MediaID:   "m1",
+		VersionID: "v1",
+		LibraryID: "l1",
+		Path:      source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Arrival","year":2016},
+		"versions":[{"id":"v1","resolution":"1080p","source":"web-dl"}],
+		"files":[{"id":"`+mediaFile.ID+`","media_id":"m1","version_id":"v1","path":"`+source+`"}],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","enabled":true}
+	}`)
+	planID := plan["id"].(string)
+
+	executeResponse := httptest.NewRecorder()
+	executeRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/execute", nil)
+	server.ServeHTTP(executeResponse, executeRequest)
+	if executeResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 execute, got %d body=%s", executeResponse.Code, executeResponse.Body.String())
+	}
+	target := filepath.Join(targetRoot, "Arrival (2016)", "Arrival - 1080p.mkv")
+	updated, ok, err := server.mediaFiles.GetFile(context.Background(), mediaFile.ID)
+	if err != nil || !ok || updated.Path != target {
+		t.Fatalf("expected executed media file path %q, got %#v ok=%v err=%v", target, updated, ok, err)
+	}
+
+	rollbackResponse := httptest.NewRecorder()
+	rollbackRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/rollback", nil)
+	server.ServeHTTP(rollbackResponse, rollbackRequest)
+	if rollbackResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 rollback, got %d body=%s", rollbackResponse.Code, rollbackResponse.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(rollbackResponse.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["rolled_back"] != float64(1) {
+		t.Fatalf("expected one rolled back action, got %#v", body)
+	}
+	rolledBackPlan := body["plan"].(map[string]any)
+	if rolledBackPlan["status"] != "canceled" {
+		t.Fatalf("expected canceled rolled back plan, got %#v", rolledBackPlan)
+	}
+	action := rolledBackPlan["actions"].([]any)[0].(map[string]any)
+	if action["status"] != "rolled_back" {
+		t.Fatalf("expected rolled_back action, got %#v", action)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("expected rollback to remove copied target, err=%v", err)
+	}
+	restored, ok, err := server.mediaFiles.GetFile(context.Background(), mediaFile.ID)
+	if err != nil || !ok || restored.Path != source {
+		t.Fatalf("expected rollback to restore media file path %q, got %#v ok=%v err=%v", source, restored, ok, err)
+	}
+}
+
 func TestOrganizerRulesAndPlanByRuleID(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

@@ -84,7 +84,8 @@ backend/internal/task         任务系统
 - dry-run 会检测计划内重复目标和磁盘上已有目标；`skip` 会标记 skipped，`rename` 会预演重命名目标，`overwrite_with_confirmation` 会标记 conflict 等待确认。
 - 冲突计划可通过 `POST /api/organizer/plans/{id}/skip-conflicts` 批量把 conflict 动作转为 skipped，也可通过 `POST /api/organizer/plans/{id}/rename-conflicts` 批量重命名目标并转回 pending。
 - 失败计划可通过 `POST /api/organizer/plans/{id}/retry` 重试失败动作；如果失败发生在媒体文件路径回写阶段，会只重试数据库路径回写，避免重复移动/复制已完成的文件操作。
-- 仍需补齐执行回滚能力，以及更细的批量计划过滤条件。
+- 已成功执行的整理计划可通过 `POST /api/organizer/plans/{id}/rollback` 回滚；move 会把目标移回源路径，copy/hardlink/symlink 会删除目标，并同步恢复关联 `media_files` 路径。
+- 仍需补齐回滚失败恢复，以及更细的批量计划过滤条件。
 
 ### scanner
 
@@ -111,6 +112,6 @@ backend/internal/task         任务系统
 1. 为下载目录监听增加更细的运行状态观测、失败重试和批量合并。
 2. 为下载目录监听增加事件去抖。
 3. 为扫描任务失败文件重试增加更细的筛选条件。
-4. 为 organizer 执行结果增加回滚能力和更细的失败恢复。
+4. 为 organizer 执行结果增加回滚失败恢复和更细的失败恢复。
 5. 为批量 organizer plan 增加冲突批量确认覆盖处理。
 ```

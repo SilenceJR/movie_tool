@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -12,6 +13,14 @@ type ConflictFilter struct {
 	SourcePathPrefix string
 	TargetPathPrefix string
 }
+
+type ConflictOperation string
+
+const (
+	ConflictOperationSkip             ConflictOperation = "skip"
+	ConflictOperationRename           ConflictOperation = "rename"
+	ConflictOperationConfirmOverwrite ConflictOperation = "confirm-overwrite"
+)
 
 func (f ConflictFilter) Matches(action Action) bool {
 	if len(f.ActionIDs) > 0 && !containsString(f.ActionIDs, action.ID) {
@@ -102,6 +111,28 @@ func ConfirmOverwriteConflicts(plan Plan, now time.Time, filter ConflictFilter) 
 	return plan, changed
 }
 
+func PreviewConflicts(plan Plan, operation ConflictOperation, filter ConflictFilter) ([]Action, error) {
+	if operation == "" {
+		operation = ConflictOperationSkip
+	}
+	switch operation {
+	case ConflictOperationSkip, ConflictOperationRename, ConflictOperationConfirmOverwrite:
+	default:
+		return nil, errUnsupportedConflictOperation(operation)
+	}
+	actions := make([]Action, 0)
+	for _, action := range plan.Actions {
+		if action.Status != ActionConflict || !filter.Matches(action) {
+			continue
+		}
+		if operation == ConflictOperationConfirmOverwrite && action.ConflictReason != ConflictReasonTargetPathExists {
+			continue
+		}
+		actions = append(actions, action)
+	}
+	return actions, nil
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -109,4 +140,8 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func errUnsupportedConflictOperation(operation ConflictOperation) error {
+	return fmt.Errorf("unsupported conflict operation %q", operation)
 }

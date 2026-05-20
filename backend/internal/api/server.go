@@ -253,6 +253,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /api/organizer/rules/", s.handleUpdateOrganizerRule)
 	s.mux.HandleFunc("DELETE /api/organizer/rules/", s.handleDeleteOrganizerRule)
 	s.mux.HandleFunc("POST /api/organizer/plan", s.handleCreateOrganizerPlan)
+	s.mux.HandleFunc("GET /api/organizer/conflicts/preview", s.handlePreviewOrganizerConflicts)
 	s.mux.HandleFunc("GET /api/organizer/plans/", s.handleGetOrganizerPlan)
 	s.mux.HandleFunc("POST /api/organizer/plans/", s.handleOrganizerPlanAction)
 	s.mux.HandleFunc("GET /api/organizer/actions", s.handleListOrganizerActions)
@@ -3013,6 +3014,37 @@ func (s *Server) handleGetOrganizerPlan(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, plan)
+}
+
+func (s *Server) handlePreviewOrganizerConflicts(w http.ResponseWriter, r *http.Request) {
+	planID := strings.TrimSpace(r.URL.Query().Get("plan_id"))
+	if planID == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("plan_id is required"))
+		return
+	}
+	plan, ok, err := s.organizer.GetPlan(r.Context(), planID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	operation := organizer.ConflictOperation(strings.TrimSpace(r.URL.Query().Get("operation")))
+	filter := parseOrganizerConflictFilter(r)
+	actions, err := organizer.PreviewConflicts(plan, operation, filter)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plan_id":         plan.ID,
+		"operation":       firstNonEmpty(string(operation), string(organizer.ConflictOperationSkip)),
+		"actions":         actions,
+		"count":           len(actions),
+		"total_conflicts": plan.Summary.ConflictCount,
+	})
 }
 
 func (s *Server) handleOrganizerPlanAction(w http.ResponseWriter, r *http.Request) {

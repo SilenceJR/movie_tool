@@ -230,6 +230,7 @@ overwrite_with_confirmation
 冲突处理：
 
 ```http
+GET /api/organizer/conflicts/preview?plan_id={planId}&operation={skip|rename|confirm-overwrite}&action_id={actionId}&action_type={mode}&conflict_reason={reason}&source_path_prefix={path}&target_path_prefix={path}
 POST /api/organizer/plans/{id}/skip-conflicts?action_id={actionId}&action_type={mode}&conflict_reason={reason}&source_path_prefix={path}&target_path_prefix={path}
 POST /api/organizer/plans/{id}/rename-conflicts?action_id={actionId}&action_type={mode}&conflict_reason={reason}&source_path_prefix={path}&target_path_prefix={path}
 POST /api/organizer/plans/{id}/confirm-overwrite-conflicts?action_id={actionId}&action_type={mode}&conflict_reason={reason}&source_path_prefix={path}&target_path_prefix={path}

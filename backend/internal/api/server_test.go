@@ -893,6 +893,67 @@ func TestSkipOrganizerPlanConflictsFiltersByActionID(t *testing.T) {
 	}
 }
 
+func TestPreviewOrganizerConflictsDoesNotMutatePlan(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	targetRoot := filepath.Join(root, "library")
+	firstTarget := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p.mkv")
+	secondTarget := filepath.Join(targetRoot, "Inception (2010)", "Inception - 2160p.mkv")
+	if err := os.MkdirAll(filepath.Dir(firstTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(firstTarget, []byte("existing first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondTarget, []byte("existing second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Inception","year":2010},
+		"versions":[{"id":"v1","resolution":"1080p"},{"id":"v2","resolution":"2160p"}],
+		"files":[
+			{"id":"f1","media_id":"m1","version_id":"v1","path":"/downloads/Inception.1080p.mkv"},
+			{"id":"f2","media_id":"m1","version_id":"v2","path":"/downloads/Inception.2160p.mkv"}
+		],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","conflict_policy":"overwrite_with_confirmation","enabled":true}
+	}`)
+	planID := plan["id"].(string)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/organizer/conflicts/preview?plan_id="+planID+"&operation=confirm-overwrite&action_id=action-2", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 conflict preview, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["count"] != float64(1) || body["total_conflicts"] != float64(2) {
+		t.Fatalf("expected one previewed conflict from two total conflicts, got %#v", body)
+	}
+	actions := body["actions"].([]any)
+	if actions[0].(map[string]any)["id"] != "action-2" {
+		t.Fatalf("expected preview for action-2, got %#v", actions)
+	}
+
+	getResponse := httptest.NewRecorder()
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/organizer/plans/"+planID, nil)
+	server.ServeHTTP(getResponse, getRequest)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 get plan after preview, got %d body=%s", getResponse.Code, getResponse.Body.String())
+	}
+	var current map[string]any
+	if err := json.NewDecoder(getResponse.Body).Decode(&current); err != nil {
+		t.Fatal(err)
+	}
+	currentActions := current["actions"].([]any)
+	if currentActions[0].(map[string]any)["status"] != "conflict" || currentActions[1].(map[string]any)["status"] != "conflict" {
+		t.Fatalf("expected preview not to mutate conflicts, got %#v", currentActions)
+	}
+}
+
 func TestRenameOrganizerPlanConflicts(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	root := t.TempDir()

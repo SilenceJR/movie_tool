@@ -112,3 +112,36 @@ func TestRenameConflictsFilterKeepsUnselectedConflictTargetsReserved(t *testing.
 		t.Fatalf("expected unselected conflict to stay unchanged, got %+v", plan.Actions[1])
 	}
 }
+
+func TestPreviewConflictsFiltersByOperation(t *testing.T) {
+	actions, err := PreviewConflicts(Plan{
+		ID:     "plan-1",
+		Status: PlanReady,
+		Actions: []Action{
+			{ID: "a1", ActionType: ActionCopy, TargetPath: "/library/a.mkv", Status: ActionConflict, ConflictReason: ConflictReasonTargetPathExists},
+			{ID: "a2", ActionType: ActionCopy, TargetPath: "/library/b.mkv", Status: ActionConflict, ConflictReason: ConflictReasonDuplicateTargetPath},
+			{ID: "a3", ActionType: ActionCopy, TargetPath: "/library/c.mkv", Status: ActionPending},
+		},
+	}, ConflictOperationConfirmOverwrite, ConflictFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 1 || actions[0].ID != "a1" {
+		t.Fatalf("expected only overwrite-confirmable conflict, got %+v", actions)
+	}
+
+	actions, err = PreviewConflicts(Plan{
+		ID:     "plan-1",
+		Status: PlanReady,
+		Actions: []Action{
+			{ID: "a1", TargetPath: "/library/movie/a.mkv", Status: ActionConflict, ConflictReason: ConflictReasonTargetPathExists},
+			{ID: "a2", TargetPath: "/library/show/b.mkv", Status: ActionConflict, ConflictReason: ConflictReasonTargetPathExists},
+		},
+	}, ConflictOperationSkip, ConflictFilter{TargetPathPrefix: "/library/movie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 1 || actions[0].ID != "a1" {
+		t.Fatalf("expected filtered preview action, got %+v", actions)
+	}
+}

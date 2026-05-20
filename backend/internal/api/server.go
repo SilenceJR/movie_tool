@@ -207,6 +207,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/libraries/", s.handleDeleteLibrary)
 	s.mux.HandleFunc("GET /api/download-directories", s.handleListDownloadDirectories)
 	s.mux.HandleFunc("POST /api/download-directories", s.handleCreateDownloadDirectory)
+	s.mux.HandleFunc("GET /api/download-directories/watch/runs", s.handleListDownloadDirectoryWatchRuns)
 	s.mux.HandleFunc("POST /api/download-directories/watch/run", s.handleRunDownloadDirectoryWatch)
 	s.mux.HandleFunc("GET /api/download-directories/", s.handleGetDownloadDirectory)
 	s.mux.HandleFunc("PATCH /api/download-directories/", s.handleUpdateDownloadDirectory)
@@ -903,6 +904,31 @@ func (s *Server) handleRunDownloadDirectoryWatch(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusAccepted, result)
+}
+
+func (s *Server) handleListDownloadDirectoryWatchRuns(w http.ResponseWriter, r *http.Request) {
+	limit, err := parseOptionalInt(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if limit < 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("limit cannot be negative"))
+		return
+	}
+	query := task.Query{
+		Type:   task.TypeDownloadWatch,
+		Status: task.Status(r.URL.Query().Get("status")),
+	}
+	runs := s.tasks.ListByQuery(query)
+	runs = newestTasksFirst(runs)
+	if limit > 0 && limit < len(runs) {
+		runs = runs[:limit]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runs":  runs,
+		"count": len(runs),
+	})
 }
 
 func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options downloadScanOptions) (downloadDirectoryWatchRun, error) {
@@ -2689,6 +2715,13 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.tasks.ListByQuery(query))
+}
+
+func newestTasksFirst(tasks []task.Task) []task.Task {
+	for left, right := 0, len(tasks)-1; left < right; left, right = left+1, right-1 {
+		tasks[left], tasks[right] = tasks[right], tasks[left]
+	}
+	return tasks
 }
 
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {

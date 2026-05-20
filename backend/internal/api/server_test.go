@@ -2424,6 +2424,65 @@ func TestRunDownloadDirectoryWatchSkipsWhenDirectoryIDDoesNotMatchWatchEnabled(t
 	}
 }
 
+func TestListDownloadDirectoryWatchRuns(t *testing.T) {
+	root := t.TempDir()
+	firstPath := filepath.Join(root, "Arrival.2016.mkv")
+	secondPath := filepath.Join(root, "Dune.2021.mkv")
+	if err := os.WriteFile(firstPath, []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+	_ = createJSON(t, server, "/api/download-directories", `{
+		"name":"Watched",
+		"path":"`+root+`",
+		"library_id":"`+library["id"].(string)+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+
+	firstResponse := httptest.NewRecorder()
+	firstRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run", nil)
+	server.ServeHTTP(firstResponse, firstRequest)
+	if firstResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 first watch run, got %d body=%s", firstResponse.Code, firstResponse.Body.String())
+	}
+	if err := os.WriteFile(secondPath, []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	secondResponse := httptest.NewRecorder()
+	secondRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run", nil)
+	server.ServeHTTP(secondResponse, secondRequest)
+	if secondResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 second watch run, got %d body=%s", secondResponse.Code, secondResponse.Body.String())
+	}
+	var secondBody map[string]any
+	if err := json.NewDecoder(secondResponse.Body).Decode(&secondBody); err != nil {
+		t.Fatal(err)
+	}
+	secondTaskID := secondBody["task"].(map[string]any)["id"]
+
+	listResponse := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/download-directories/watch/runs?status=succeeded&limit=1", nil)
+	server.ServeHTTP(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 watch runs, got %d body=%s", listResponse.Code, listResponse.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(listResponse.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["count"] != float64(1) {
+		t.Fatalf("expected one limited watch run, got %#v", body)
+	}
+	runs := body["runs"].([]any)
+	if runs[0].(map[string]any)["id"] != secondTaskID || runs[0].(map[string]any)["type"] != string(task.TypeDownloadWatch) {
+		t.Fatalf("expected latest download watch run, got %#v", runs)
+	}
+}
+
 func TestRunDownloadDirectoryWatchSkipsWhenAlreadyRunning(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	server.downloadWatchMu.Lock()

@@ -85,22 +85,39 @@ func ParseAVNumber(value string) (AVNumber, bool) {
 }
 
 func SelectAVLiveSource(parsed AVNumber, requested string) (string, []string, bool) {
+	sources, skipped, ok := SelectAVLiveSources(parsed, requested)
+	if len(sources) == 0 {
+		return strings.ToLower(strings.TrimSpace(requested)), skipped, ok
+	}
+	return sources[0], skipped, ok
+}
+
+func SelectAVLiveSources(parsed AVNumber, requested string) ([]string, []string, bool) {
 	source := strings.ToLower(strings.TrimSpace(requested))
 	if source != "" && source != AVSourceAuto {
-		return source, nil, IsImplementedAVLiveSource(source)
+		return []string{source}, nil, IsImplementedAVLiveSource(source)
 	}
 	skipped := make([]string, 0)
+	sources := make([]string, 0)
+	seen := map[string]struct{}{}
 	for _, provider := range parsed.PreferredProviders {
 		provider = strings.ToLower(strings.TrimSpace(provider))
 		if provider == "" {
 			continue
 		}
 		if IsImplementedAVLiveSource(provider) {
-			return provider, skipped, true
+			if _, ok := seen[provider]; !ok {
+				seen[provider] = struct{}{}
+				sources = append(sources, provider)
+			}
+			continue
 		}
 		skipped = append(skipped, provider)
 	}
-	return JavDBProvider, skipped, true
+	if len(sources) == 0 {
+		sources = append(sources, JavDBProvider)
+	}
+	return sources, skipped, true
 }
 
 func IsImplementedAVLiveSource(source string) bool {

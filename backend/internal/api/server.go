@@ -2701,51 +2701,73 @@ func (s *Server) handleVerifyAVScraper(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requested := firstNonEmpty(r.URL.Query().Get("source"), scraper.AVSourceAuto)
-	source, skipped, ok := scraper.SelectAVLiveSource(parsed, requested)
+	sources, skipped, ok := scraper.SelectAVLiveSources(parsed, requested)
 	if !ok {
-		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
+		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", requested))
 		return
 	}
-	selection := map[string]any{
-		"requested":                     requested,
-		"selected":                      source,
-		"skipped_unimplemented_sources": skipped,
-	}
-	candidates, err := s.searchAVCandidates(r.Context(), source, scraper.SearchQuery{MediaType: "av", Number: parsed.Normalized})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if len(candidates) == 0 {
+	attempted := make([]string, 0, len(sources))
+	var lastErr error
+	var lastCandidates []scraper.Candidate
+	for _, source := range sources {
+		attempted = append(attempted, source)
+		candidates, err := s.searchAVCandidates(r.Context(), source, scraper.SearchQuery{MediaType: "av", Number: parsed.Normalized})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		lastCandidates = candidates
+		if len(candidates) == 0 {
+			continue
+		}
+		metadata, err := s.fetchAVMetadata(r.Context(), source, candidates[0].ExternalID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		selection := map[string]any{
+			"requested":                     requested,
+			"selected":                      source,
+			"attempted_sources":             attempted,
+			"skipped_unimplemented_sources": skipped,
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"provider":         scraper.AVProvider,
 			"source":           source,
 			"media_type":       "av",
 			"persisted":        false,
-			"verified":         false,
+			"verified":         true,
 			"parsed":           parsed,
 			"source_selection": selection,
-			"count":            0,
-			"candidates":       candidates,
+			"count":            len(candidates),
+			"candidate":        candidates[0],
+			"metadata":         metadata,
 		})
 		return
 	}
-	metadata, err := s.fetchAVMetadata(r.Context(), source, candidates[0].ExternalID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if lastErr != nil && len(lastCandidates) == 0 {
+		writeError(w, http.StatusBadRequest, lastErr)
 		return
 	}
+	selected := ""
+	if len(attempted) > 0 {
+		selected = attempted[len(attempted)-1]
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"provider":         scraper.AVProvider,
-		"source":           source,
-		"media_type":       "av",
-		"persisted":        false,
-		"verified":         true,
-		"parsed":           parsed,
-		"source_selection": selection,
-		"count":            len(candidates),
-		"candidate":        candidates[0],
-		"metadata":         metadata,
+		"provider":   scraper.AVProvider,
+		"source":     selected,
+		"media_type": "av",
+		"persisted":  false,
+		"verified":   false,
+		"parsed":     parsed,
+		"source_selection": map[string]any{
+			"requested":                     requested,
+			"selected":                      selected,
+			"attempted_sources":             attempted,
+			"skipped_unimplemented_sources": skipped,
+		},
+		"count":      len(lastCandidates),
+		"candidates": lastCandidates,
 	})
 }
 

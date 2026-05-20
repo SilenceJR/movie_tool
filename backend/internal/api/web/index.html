@@ -1034,7 +1034,9 @@
         const candidate = result.candidate || {};
         candidate.metadata = result.metadata || {};
         renderScraperCandidates([candidate]);
-        setStatus(`${scraperSourceName(result.source || source)} 验证完成，已获取首个候选详情。`);
+        const attempted = result.source_selection?.attempted_sources || [];
+        const attemptedSuffix = attempted.length > 1 ? `，尝试源：${attempted.map(scraperSourceName).join('、')}` : '';
+        setStatus(`${scraperSourceName(result.source || source)} 验证完成，已获取首个候选详情${attemptedSuffix}。`);
       } catch (error) {
         setStatus(`验证失败：${error.message}`, true);
       }

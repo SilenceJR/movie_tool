@@ -416,6 +416,57 @@ func TestVerifyAVScraperSearchesAndFetchesFirstCandidate(t *testing.T) {
 	}
 }
 
+func TestVerifyAVScraperAutoFallsBackToNextImplementedSource(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Host + r.URL.Path {
+		case "javdb.test/search":
+			return jsonResponse(`<div class="empty">no result</div>`), nil
+		case "javbus.test/search/SSNI-00123":
+			return jsonResponse(`
+				<a class="movie-box" href="/SSNI-00123">
+					<img src="/pics/ssni.jpg">
+					<div class="photo-info">SSNI-00123 Example Title</div>
+					<div>2020-02-03</div>
+				</a>
+			`), nil
+		case "javbus.test/SSNI-00123":
+			return jsonResponse(`
+				<h3>SSNI-00123 Example Title</h3>
+				<img src="/pics/ssni-detail.jpg">
+				<p><span>發行日期:</span> 2020-02-03</p>
+			`), nil
+		default:
+			t.Fatalf("unexpected verify fallback request %s", r.URL.String())
+			return nil, nil
+		}
+	})}
+	server := NewServerWithDependencies(config.Config{
+		Host:          "127.0.0.1",
+		Port:          "0",
+		JavDBBaseURL:  "https://javdb.test",
+		JavBusBaseURL: "https://javbus.test",
+	}, Dependencies{ScraperHTTP: client})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/av/verify?number=ssni00123&source=auto", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 av verify, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["verified"] != true || body["source"] != "javbus" {
+		t.Fatalf("expected javbus fallback verify, got %#v", body)
+	}
+	selection := body["source_selection"].(map[string]any)
+	attempted := selection["attempted_sources"].([]any)
+	if len(attempted) != 2 || attempted[0] != "javdb" || attempted[1] != "javbus" {
+		t.Fatalf("expected javdb then javbus attempts, got %#v", attempted)
+	}
+}
+
 func TestSearchAVScraperUsesJavBus(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/search/SSNI-00123" {

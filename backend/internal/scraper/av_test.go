@@ -45,9 +45,9 @@ func TestSelectAVLiveSourceAutoSkipsUnimplementedProviders(t *testing.T) {
 	if !ok {
 		t.Fatal("expected parse success")
 	}
-	source, skipped, ok := SelectAVLiveSource(parsed, AVSourceAuto)
-	if !ok || source != JavDBProvider {
-		t.Fatalf("expected javdb fallback, got source=%q ok=%v", source, ok)
+	sources, skipped, ok := SelectAVLiveSources(parsed, AVSourceAuto)
+	if !ok || len(sources) != 2 || sources[0] != JavDBProvider || sources[1] != JavBusProvider {
+		t.Fatalf("expected javdb/javbus fallback, got sources=%#v ok=%v", sources, ok)
 	}
 	if len(skipped) != 1 || skipped[0] != "fc2" {
 		t.Fatalf("expected skipped fc2, got %#v", skipped)

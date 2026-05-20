@@ -925,10 +925,57 @@ func (s *Server) handleListDownloadDirectoryWatchRuns(w http.ResponseWriter, r *
 	if limit > 0 && limit < len(runs) {
 		runs = runs[:limit]
 	}
+	includeSummary := false
+	if value := r.URL.Query().Get("include_summary"); value != "" {
+		includeSummary, err = parseBoolQuery(value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	if includeSummary {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"runs":  s.downloadWatchRunDetails(runs),
+			"count": len(runs),
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runs":  runs,
 		"count": len(runs),
 	})
+}
+
+type downloadDirectoryWatchRunDetail struct {
+	Task    task.Task                       `json:"task"`
+	Summary []downloadDirectoryWatchSummary `json:"summary"`
+}
+
+func (s *Server) downloadWatchRunDetails(runs []task.Task) []downloadDirectoryWatchRunDetail {
+	details := make([]downloadDirectoryWatchRunDetail, 0, len(runs))
+	for _, run := range runs {
+		details = append(details, downloadDirectoryWatchRunDetail{
+			Task:    run,
+			Summary: parseDownloadWatchSummaryLogs(s.tasks.Logs(run.ID)),
+		})
+	}
+	return details
+}
+
+func parseDownloadWatchSummaryLogs(logs []task.LogEntry) []downloadDirectoryWatchSummary {
+	const prefix = "watch summary: "
+	summary := make([]downloadDirectoryWatchSummary, 0)
+	for _, entry := range logs {
+		if !strings.HasPrefix(entry.Message, prefix) {
+			continue
+		}
+		var item downloadDirectoryWatchSummary
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(entry.Message, prefix)), &item); err != nil {
+			continue
+		}
+		summary = append(summary, item)
+	}
+	return summary
 }
 
 func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options downloadScanOptions) (downloadDirectoryWatchRun, error) {

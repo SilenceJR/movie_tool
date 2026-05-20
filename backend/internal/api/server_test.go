@@ -2471,7 +2471,7 @@ func TestListDownloadDirectoryWatchRuns(t *testing.T) {
 	secondTaskID := secondBody["task"].(map[string]any)["id"]
 
 	listResponse := httptest.NewRecorder()
-	listRequest := httptest.NewRequest(http.MethodGet, "/api/download-directories/watch/runs?status=succeeded&limit=1", nil)
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/download-directories/watch/runs?status=succeeded&limit=1&include_summary=true", nil)
 	server.ServeHTTP(listResponse, listRequest)
 	if listResponse.Code != http.StatusOK {
 		t.Fatalf("expected 200 watch runs, got %d body=%s", listResponse.Code, listResponse.Body.String())
@@ -2484,8 +2484,14 @@ func TestListDownloadDirectoryWatchRuns(t *testing.T) {
 		t.Fatalf("expected one limited watch run, got %#v", body)
 	}
 	runs := body["runs"].([]any)
-	if runs[0].(map[string]any)["id"] != secondTaskID || runs[0].(map[string]any)["type"] != string(task.TypeDownloadWatch) {
+	run := runs[0].(map[string]any)
+	taskBody := run["task"].(map[string]any)
+	if taskBody["id"] != secondTaskID || taskBody["type"] != string(task.TypeDownloadWatch) {
 		t.Fatalf("expected latest download watch run, got %#v", runs)
+	}
+	summary := run["summary"].([]any)
+	if len(summary) != 1 || summary[0].(map[string]any)["imported_count"] != float64(2) {
+		t.Fatalf("expected parsed watch summary on run detail, got %#v", run)
 	}
 }
 

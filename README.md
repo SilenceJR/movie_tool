@@ -31,6 +31,16 @@ frontend/             Flutter 前端规划目录
 deployments/          Docker 与部署配置
 ```
 
+## 快速查看
+
+启动后端后可直接打开内置 Web 控制台：
+
+```text
+http://127.0.0.1:8080/
+```
+
+控制台随 Go 服务一起启动，会展示当前已实现能力、数据概况、近期任务和下载目录监听状态。
+
 ## 文档入口
 
 - [需求说明](docs/requirements.md)

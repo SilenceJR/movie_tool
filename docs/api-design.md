@@ -19,6 +19,16 @@
 }
 ```
 
+## 2.1 控制台
+
+```http
+GET /api/health
+GET /api/config
+GET /api/dashboard
+```
+
+`GET /api/dashboard` 为内置 Web 控制台提供汇总数据，包含媒体库、媒体条目、媒体文件、下载目录、自动化、任务风险计数、已实现能力清单、近期任务和最近下载目录监听批次摘要。
+
 ## 3. 媒体库
 
 ```http

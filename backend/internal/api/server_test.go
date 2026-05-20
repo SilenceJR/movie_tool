@@ -41,6 +41,52 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestWebAppServedAtRoot(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 web app, got %d body=%s", response.Code, response.Body.String())
+	}
+	if contentType := response.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("expected html content type, got %q", contentType)
+	}
+	if !strings.Contains(response.Body.String(), "Movie Tool 控制台") {
+		t.Fatalf("expected embedded web console, got %s", response.Body.String())
+	}
+}
+
+func TestDashboardSummary(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+t.TempDir()+`"}`)
+	server.tasks.Enqueue(task.TypeLibraryScan, "scan movies")
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 dashboard, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	counts := body["counts"].(map[string]any)
+	if counts["libraries"] != float64(1) || counts["tasks"] != float64(1) || counts["pending_tasks"] != float64(1) {
+		t.Fatalf("expected dashboard counts from stores, got %#v", counts)
+	}
+	if len(body["features"].([]any)) == 0 {
+		t.Fatalf("expected dashboard feature checklist, got %#v", body)
+	}
+	if len(body["recent_tasks"].([]any)) != 1 {
+		t.Fatalf("expected one recent task, got %#v", body["recent_tasks"])
+	}
+}
+
 func TestCreateAndListLibraries(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

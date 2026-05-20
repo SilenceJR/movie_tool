@@ -185,7 +185,11 @@ func (s *Server) StartDownloadWatchTicker(ctx context.Context, interval time.Dur
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /", s.handleWebApp)
+	s.mux.HandleFunc("GET /ui", s.handleWebApp)
+	s.mux.HandleFunc("GET /ui/", s.handleWebApp)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/dashboard", s.handleDashboard)
 	s.mux.HandleFunc("GET /api/config", s.handleConfig)
 	s.mux.HandleFunc("GET /api/integrations", s.handleListIntegrations)
 	s.mux.HandleFunc("POST /api/integrations", s.handleCreateIntegration)

@@ -937,6 +937,17 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 		return downloadDirectoryWatchRun{}, err
 	}
 	directories = filterDownloadDirectoriesByID(directories, options.DownloadDirectoryIDs)
+	if len(directories) == 0 && len(options.DownloadDirectoryIDs) > 0 {
+		completedAt := time.Now().UTC()
+		return downloadDirectoryWatchRun{
+			Skipped:          true,
+			SkipReason:       "no watch-enabled download directories matched requested directory_id",
+			TotalDirectories: 0,
+			StartedAt:        startedAt,
+			CompletedAt:      completedAt,
+			DurationMS:       completedAt.Sub(startedAt).Milliseconds(),
+		}, nil
+	}
 	var taskRecord *task.Task
 	if len(directories) > 0 {
 		created := s.tasks.Enqueue(task.TypeDownloadWatch, "run download directory watch")

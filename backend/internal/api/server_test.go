@@ -2369,6 +2369,34 @@ func TestRunDownloadDirectoryWatchFiltersByDirectoryID(t *testing.T) {
 	}
 }
 
+func TestRunDownloadDirectoryWatchSkipsWhenDirectoryIDDoesNotMatchWatchEnabled(t *testing.T) {
+	root := t.TempDir()
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+	directory := createJSON(t, server, "/api/download-directories", `{
+		"name":"Disabled watch",
+		"path":"`+root+`",
+		"library_id":"`+library["id"].(string)+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":false
+	}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run?directory_id="+url.QueryEscape(directory["id"].(string)), nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 skipped filtered watch run, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["skipped"] != true || body["skip_reason"] == "" || body["total_directories"] != float64(0) {
+		t.Fatalf("expected skipped response for unmatched directory_id, got %#v", body)
+	}
+}
+
 func TestRunDownloadDirectoryWatchSkipsWhenAlreadyRunning(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 	server.downloadWatchMu.Lock()

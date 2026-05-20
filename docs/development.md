@@ -53,7 +53,7 @@ backend/internal/task         任务系统
 
 - 已有 HTTP server。
 - 已有 `/api/health`。
-- 已有随服务启动的内置 Web 控制台，根路径 `/` 和 `/ui` 可直接查看当前能力清单、数据概况、近期任务和下载目录监听批次；控制台数据来自 `/api/dashboard`，并已接入媒体库/下载目录快速创建、配置列表展示、AV 番号解析、JavDB live 搜索和候选显式保存。
+- 已有随服务启动的内置 Web 控制台，根路径 `/` 和 `/ui` 可直接查看当前能力清单、数据概况、近期任务和下载目录监听批次；控制台数据来自 `/api/dashboard`，并已接入媒体库/下载目录快速创建、配置列表展示、AV 番号解析、JavDB live 搜索、候选显式保存、已保存候选加载和选择锁定。
 - 已有 `/api/config`。
 - 已有 SQLite 驱动注册、数据库打开、连接 PRAGMA、embedded migration runner 启动集成。
 - 已有 `/api/libraries` CRUD；生产入口使用 SQL store，测试默认使用内存 store。
@@ -129,7 +129,7 @@ backend/internal/task         任务系统
 
 ```text
 1. 继续扩展 AV live scraper：接入 JavBus/FC2/MGStage/R18/Jav321 逐源 search/fetch 验证，并对各源字段做归一化对齐。
-2. 完善控制台待确认体验，支持从已保存候选直接进入选择/锁定流程。
+2. 继续完善控制台待确认体验：增加候选对比视图、候选详情预览和批量处理。
 3. 将 RAG 配置从环境变量提升为可持久化、可在控制台编辑的配置模型。
 4. 将 RAG 入库/查询能力接入后端任务系统，支持 media_text collection。
 5. 增加自然语言媒体搜索 API：问题 -> embedding -> Qdrant -> Qwen/Ollama 总结。

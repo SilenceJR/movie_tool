@@ -600,6 +600,7 @@
             </div>
             <div class="actions">
               <button class="btn" type="button" id="scraper-parse">解析</button>
+              <button class="btn" type="button" id="scraper-load">加载候选</button>
               <button class="btn primary" type="submit">搜索候选</button>
             </div>
           </form>
@@ -695,6 +696,7 @@
     };
     els.scraperForm = document.querySelector('#scraper-form');
     els.scraperParse = document.querySelector('#scraper-parse');
+    els.scraperLoad = document.querySelector('#scraper-load');
     els.scraperResults = document.querySelector('#scraper-results');
 
     let liveScraperCandidates = [];
@@ -899,6 +901,22 @@
       `).join('') || '<div class="empty">没有搜索到候选。</div>';
     }
 
+    function renderSavedScraperCandidates(candidates) {
+      liveScraperCandidates = [];
+      els.scraperResults.innerHTML = (candidates || []).map(item => `
+        <section class="list-item">
+          <div class="list-title">
+            <span>${escapeHtml(item.title || item.external_id || '--')}</span>
+            ${statusBadge(`${item.provider || 'source'} ${item.score || 0}`)}
+          </div>
+          <div class="list-meta">${escapeHtml(item.external_id || '--')} / ${escapeHtml(item.year || '--')}</div>
+          <div class="list-meta">媒体：${escapeHtml(item.media_id || '--')} / 文件：${escapeHtml(item.media_file_id || '--')}</div>
+          <div class="list-meta">${escapeHtml((item.score_reasons || []).join('、') || item.overview || '--')}</div>
+          <button class="btn primary scraper-select" type="button" data-id="${escapeHtml(item.id)}" data-media-id="${escapeHtml(item.media_id || '')}">选择并锁定</button>
+        </section>
+      `).join('') || '<div class="empty">没有已保存候选。</div>';
+    }
+
     function scraperIDs() {
       const form = new FormData(els.scraperForm);
       return {
@@ -954,6 +972,24 @@
         setStatus(`解析失败：${error.message}`, true);
       }
     });
+    els.scraperLoad.addEventListener('click', async () => {
+      const ids = scraperIDs();
+      if (!ids.media_id && !ids.media_file_id) {
+        setStatus('加载候选失败：请先填写媒体 ID 或媒体文件 ID。', true);
+        return;
+      }
+      const query = ids.media_id
+        ? `media_id=${encodeURIComponent(ids.media_id)}`
+        : `media_file_id=${encodeURIComponent(ids.media_file_id)}`;
+      try {
+        setStatus('正在加载已保存候选...');
+        const candidates = await request(`/api/scrape-candidates?${query}`);
+        renderSavedScraperCandidates(candidates);
+        setStatus(`已加载 ${candidates.length || 0} 个候选。`);
+      } catch (error) {
+        setStatus(`加载候选失败：${error.message}`, true);
+      }
+    });
     els.scraperForm.addEventListener('submit', async event => {
       event.preventDefault();
       const form = new FormData(els.scraperForm);
@@ -972,9 +1008,35 @@
       }
     });
     els.scraperResults.addEventListener('click', async event => {
-      const button = event.target.closest('.scraper-save');
-      if (!button) return;
-      const candidate = liveScraperCandidates[Number(button.dataset.index)];
+      const saveButton = event.target.closest('.scraper-save');
+      const selectButton = event.target.closest('.scraper-select');
+      if (!saveButton && !selectButton) return;
+      if (selectButton) {
+        const candidateID = selectButton.dataset.id;
+        const mediaID = selectButton.dataset.mediaId || scraperIDs().media_id;
+        if (!candidateID || !mediaID) {
+          setStatus('选择候选失败：候选 ID 和媒体 ID 必填。', true);
+          return;
+        }
+        try {
+          setStatus('正在选择候选...');
+          await jsonRequest('/api/scrape-decisions', {
+            media_id: mediaID,
+            candidate_id: candidateID,
+            decision_source: 'user',
+            decision: 'select',
+            confidence: 100,
+            reason: '控制台确认',
+            locked: true
+          });
+          await load();
+          setStatus('候选已选择并锁定。');
+        } catch (error) {
+          setStatus(`选择候选失败：${error.message}`, true);
+        }
+        return;
+      }
+      const candidate = liveScraperCandidates[Number(saveButton.dataset.index)];
       const ids = scraperIDs();
       if (!candidate) {
         setStatus('保存失败：候选不存在。', true);

@@ -589,6 +589,7 @@
             <div class="field">
               <label for="scraper-source">数据源</label>
               <select id="scraper-source" name="source">
+                <option value="auto">自动匹配</option>
                 <option value="javdb">JavDB</option>
                 <option value="javbus">JavBus</option>
               </select>
@@ -710,6 +711,7 @@
     let liveScraperCandidates = [];
 
     function scraperSourceName(source) {
+      if (source === 'auto') return '自动匹配';
       if (source === 'javbus') return 'JavBus';
       return 'JavDB';
     }
@@ -1039,7 +1041,10 @@
         setStatus(`正在搜索 ${sourceName} 候选...`);
         const result = await request(`/api/scrapers/av/search?number=${encodeURIComponent(number)}&source=${encodeURIComponent(source)}`);
         renderScraperCandidates(result.candidates || []);
-        setStatus(`${sourceName} 搜索完成，候选 ${result.count || 0} 个。`);
+        const selectedSource = result.source_selection?.selected || result.source || source;
+        const skipped = result.source_selection?.skipped_unimplemented_sources || [];
+        const skippedSuffix = skipped.length ? `，已跳过未接入源：${skipped.join('、')}` : '';
+        setStatus(`${scraperSourceName(selectedSource)} 搜索完成，候选 ${result.count || 0} 个${skippedSuffix}。`);
       } catch (error) {
         setStatus(`搜索失败：${error.message}`, true);
       }

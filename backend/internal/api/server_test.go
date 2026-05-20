@@ -292,6 +292,44 @@ func TestSearchAVScraperUsesJavDB(t *testing.T) {
 	}
 }
 
+func TestSearchAVScraperAutoSelectsImplementedSource(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/search" || r.URL.Query().Get("q") != "FC2-PPV-1234567" {
+			t.Fatalf("unexpected javdb search request %s", r.URL.String())
+		}
+		return jsonResponse(`
+			<a class="box" href="/v/fc2-id">
+				<img src="/covers/fc2.jpg">
+				<div class="video-title">FC2-PPV-1234567 Example Title</div>
+				<div class="meta">2021-04-05</div>
+			</a>
+		`), nil
+	})}
+	server := NewServerWithDependencies(config.Config{Host: "127.0.0.1", Port: "0", JavDBBaseURL: "https://javdb.test"}, Dependencies{ScraperHTTP: client})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/av/search?number=FC2-PPV-1234567&source=auto", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 av search, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["source"] != "javdb" {
+		t.Fatalf("expected javdb selected, got %#v", body)
+	}
+	selection := body["source_selection"].(map[string]any)
+	if selection["requested"] != "auto" || selection["selected"] != "javdb" {
+		t.Fatalf("unexpected source selection: %#v", selection)
+	}
+	skipped := selection["skipped_unimplemented_sources"].([]any)
+	if len(skipped) != 1 || skipped[0] != "fc2" {
+		t.Fatalf("expected skipped fc2, got %#v", skipped)
+	}
+}
+
 func TestFetchAVScraperUsesJavDB(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/v/javdb-id" {

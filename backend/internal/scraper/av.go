@@ -7,6 +7,7 @@ import (
 )
 
 const AVProvider = "av"
+const AVSourceAuto = "auto"
 
 type AVNumber struct {
 	Raw                string   `json:"raw"`
@@ -81,4 +82,32 @@ func ParseAVNumber(value string) (AVNumber, bool) {
 		}, true
 	}
 	return AVNumber{Raw: raw}, false
+}
+
+func SelectAVLiveSource(parsed AVNumber, requested string) (string, []string, bool) {
+	source := strings.ToLower(strings.TrimSpace(requested))
+	if source != "" && source != AVSourceAuto {
+		return source, nil, IsImplementedAVLiveSource(source)
+	}
+	skipped := make([]string, 0)
+	for _, provider := range parsed.PreferredProviders {
+		provider = strings.ToLower(strings.TrimSpace(provider))
+		if provider == "" {
+			continue
+		}
+		if IsImplementedAVLiveSource(provider) {
+			return provider, skipped, true
+		}
+		skipped = append(skipped, provider)
+	}
+	return JavDBProvider, skipped, true
+}
+
+func IsImplementedAVLiveSource(source string) bool {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case JavDBProvider, JavBusProvider:
+		return true
+	default:
+		return false
+	}
 }

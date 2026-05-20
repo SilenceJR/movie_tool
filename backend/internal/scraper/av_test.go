@@ -39,3 +39,24 @@ func TestParseAVNumberRejectsUnknown(t *testing.T) {
 		t.Fatalf("expected no parse, got %#v", parsed)
 	}
 }
+
+func TestSelectAVLiveSourceAutoSkipsUnimplementedProviders(t *testing.T) {
+	parsed, ok := ParseAVNumber("FC2-PPV-1234567")
+	if !ok {
+		t.Fatal("expected parse success")
+	}
+	source, skipped, ok := SelectAVLiveSource(parsed, AVSourceAuto)
+	if !ok || source != JavDBProvider {
+		t.Fatalf("expected javdb fallback, got source=%q ok=%v", source, ok)
+	}
+	if len(skipped) != 1 || skipped[0] != "fc2" {
+		t.Fatalf("expected skipped fc2, got %#v", skipped)
+	}
+}
+
+func TestSelectAVLiveSourceRejectsUnsupportedExplicitSource(t *testing.T) {
+	source, _, ok := SelectAVLiveSource(AVNumber{}, "fc2")
+	if ok || source != "fc2" {
+		t.Fatalf("expected explicit fc2 to be rejected, got source=%q ok=%v", source, ok)
+	}
+}

@@ -2536,7 +2536,7 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 	if provider == scraper.JavDBProvider {
 		switch action {
 		case "search":
-			s.handleSearchJavDBScraper(w, r)
+			s.handleSearchJavDBScraper(w, r, nil)
 		case "fetch":
 			s.handleFetchJavDBScraper(w, r)
 		case "candidates":
@@ -2549,7 +2549,7 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 	if provider == scraper.JavBusProvider {
 		switch action {
 		case "search":
-			s.handleSearchJavBusScraper(w, r)
+			s.handleSearchJavBusScraper(w, r, nil)
 		case "fetch":
 			s.handleFetchJavBusScraper(w, r)
 		case "candidates":
@@ -2636,14 +2636,23 @@ func (s *Server) handleSaveScraperCandidate(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleSearchAVScraper(w http.ResponseWriter, r *http.Request) {
-	source := strings.ToLower(firstNonEmpty(r.URL.Query().Get("source"), scraper.JavDBProvider))
+	requested := firstNonEmpty(r.URL.Query().Get("source"), scraper.JavDBProvider)
+	parsed, _ := scraper.ParseAVNumber(r.URL.Query().Get("number"))
+	source, skipped, ok := scraper.SelectAVLiveSource(parsed, requested)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
+		return
+	}
+	selection := map[string]any{
+		"requested":                     requested,
+		"selected":                      source,
+		"skipped_unimplemented_sources": skipped,
+	}
 	switch source {
 	case scraper.JavDBProvider:
-		s.handleSearchJavDBScraper(w, r)
+		s.handleSearchJavDBScraper(w, r, selection)
 	case scraper.JavBusProvider:
-		s.handleSearchJavBusScraper(w, r)
-	default:
-		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
+		s.handleSearchJavBusScraper(w, r, selection)
 	}
 }
 
@@ -2659,7 +2668,7 @@ func (s *Server) handleFetchAVScraper(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleSearchJavDBScraper(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSearchJavDBScraper(w http.ResponseWriter, r *http.Request, selection map[string]any) {
 	query := scraper.SearchQuery{
 		MediaType: "av",
 		Title:     r.URL.Query().Get("title"),
@@ -2671,14 +2680,18 @@ func (s *Server) handleSearchJavDBScraper(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"provider":   scraper.AVProvider,
 		"source":     scraper.JavDBProvider,
 		"media_type": "av",
 		"persisted":  false,
 		"count":      len(candidates),
 		"candidates": candidates,
-	})
+	}
+	if selection != nil {
+		response["source_selection"] = selection
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleFetchJavDBScraper(w http.ResponseWriter, r *http.Request) {
@@ -2702,7 +2715,7 @@ func (s *Server) javdbClient() scraper.JavDBClient {
 	}
 }
 
-func (s *Server) handleSearchJavBusScraper(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSearchJavBusScraper(w http.ResponseWriter, r *http.Request, selection map[string]any) {
 	query := scraper.SearchQuery{
 		MediaType: "av",
 		Title:     r.URL.Query().Get("title"),
@@ -2714,14 +2727,18 @@ func (s *Server) handleSearchJavBusScraper(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"provider":   scraper.AVProvider,
 		"source":     scraper.JavBusProvider,
 		"media_type": "av",
 		"persisted":  false,
 		"count":      len(candidates),
 		"candidates": candidates,
-	})
+	}
+	if selection != nil {
+		response["source_selection"] = selection
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleFetchJavBusScraper(w http.ResponseWriter, r *http.Request) {

@@ -208,6 +208,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/download-directories", s.handleListDownloadDirectories)
 	s.mux.HandleFunc("POST /api/download-directories", s.handleCreateDownloadDirectory)
 	s.mux.HandleFunc("GET /api/download-directories/watch/runs", s.handleListDownloadDirectoryWatchRuns)
+	s.mux.HandleFunc("POST /api/download-directories/watch/runs/", s.handleDownloadDirectoryWatchRunAction)
 	s.mux.HandleFunc("POST /api/download-directories/watch/run", s.handleRunDownloadDirectoryWatch)
 	s.mux.HandleFunc("GET /api/download-directories/", s.handleGetDownloadDirectory)
 	s.mux.HandleFunc("PATCH /api/download-directories/", s.handleUpdateDownloadDirectory)
@@ -946,6 +947,54 @@ func (s *Server) handleListDownloadDirectoryWatchRuns(w http.ResponseWriter, r *
 	})
 }
 
+func (s *Server) handleDownloadDirectoryWatchRunAction(w http.ResponseWriter, r *http.Request) {
+	id, action, err := pathIDAction(r.URL.Path, "/api/download-directories/watch/runs/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	switch action {
+	case "retry-failed":
+		s.handleRetryFailedDownloadDirectoryWatchRun(w, r, id)
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported download directory watch run action %q", action))
+	}
+}
+
+func (s *Server) handleRetryFailedDownloadDirectoryWatchRun(w http.ResponseWriter, r *http.Request, id string) {
+	run, ok := s.tasks.Get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("download directory watch run not found"))
+		return
+	}
+	if run.Type != task.TypeDownloadWatch {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("task is not a download directory watch run"))
+		return
+	}
+	options, err := parseDownloadScanOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	failedDirectoryIDs := failedDownloadWatchDirectoryIDs(parseDownloadWatchSummaryLogs(s.tasks.Logs(id)))
+	if len(failedDirectoryIDs) == 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("download directory watch run has no failed directories to retry"))
+		return
+	}
+	options.DownloadDirectoryIDs = failedDirectoryIDs
+	result, err := s.RunDownloadDirectoryWatch(r.Context(), options)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"source_task_id":      id,
+		"retry_directory_ids": failedDirectoryIDs,
+		"retry_count":         len(failedDirectoryIDs),
+		"run":                 result,
+	})
+}
+
 type downloadDirectoryWatchRunDetail struct {
 	Task    task.Task                       `json:"task"`
 	Summary []downloadDirectoryWatchSummary `json:"summary"`
@@ -976,6 +1025,22 @@ func parseDownloadWatchSummaryLogs(logs []task.LogEntry) []downloadDirectoryWatc
 		summary = append(summary, item)
 	}
 	return summary
+}
+
+func failedDownloadWatchDirectoryIDs(summary []downloadDirectoryWatchSummary) []string {
+	seen := make(map[string]bool)
+	ids := make([]string, 0)
+	for _, item := range summary {
+		if item.Status != "failed" || strings.TrimSpace(item.DownloadDirectoryID) == "" {
+			continue
+		}
+		if seen[item.DownloadDirectoryID] {
+			continue
+		}
+		seen[item.DownloadDirectoryID] = true
+		ids = append(ids, item.DownloadDirectoryID)
+	}
+	return ids
 }
 
 func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options downloadScanOptions) (downloadDirectoryWatchRun, error) {

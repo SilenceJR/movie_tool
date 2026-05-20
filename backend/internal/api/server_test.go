@@ -2345,6 +2345,61 @@ func TestRunDownloadDirectoryWatchReportsDirectoryFailures(t *testing.T) {
 	}
 }
 
+func TestRetryFailedDownloadDirectoryWatchRun(t *testing.T) {
+	mediaRoot := t.TempDir()
+	downloadRoot := filepath.Join(t.TempDir(), "missing")
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+mediaRoot+`"}`)
+	createJSON(t, server, "/api/download-directories", `{
+		"name":"Missing download",
+		"path":"`+downloadRoot+`",
+		"library_id":"`+library["id"].(string)+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 watch run with failed directory, got %d body=%s", response.Code, response.Body.String())
+	}
+	var firstBody map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&firstBody); err != nil {
+		t.Fatal(err)
+	}
+	taskBody := firstBody["task"].(map[string]any)
+	if firstBody["failure_count"] != float64(1) {
+		t.Fatalf("expected one failed directory before retry, got %#v", firstBody)
+	}
+
+	if err := os.MkdirAll(downloadRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(downloadRoot, "Arrival.2016.mkv"), []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	retryResponse := httptest.NewRecorder()
+	retryRequest := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/runs/"+taskBody["id"].(string)+"/retry-failed", nil)
+	server.ServeHTTP(retryResponse, retryRequest)
+	if retryResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 retry failed watch directories, got %d body=%s", retryResponse.Code, retryResponse.Body.String())
+	}
+	var retryBody map[string]any
+	if err := json.NewDecoder(retryResponse.Body).Decode(&retryBody); err != nil {
+		t.Fatal(err)
+	}
+	if retryBody["source_task_id"] != taskBody["id"] || retryBody["retry_count"] != float64(1) {
+		t.Fatalf("expected retry metadata, got %#v", retryBody)
+	}
+	run := retryBody["run"].(map[string]any)
+	if run["total_directories"] != float64(1) || run["total_imported"] != float64(1) || run["failure_count"] != float64(0) {
+		t.Fatalf("expected retry to import repaired directory, got %#v", run)
+	}
+}
+
 func TestRunDownloadDirectoryWatchFiltersByDirectoryID(t *testing.T) {
 	mediaRoot := t.TempDir()
 	firstRoot := t.TempDir()

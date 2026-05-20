@@ -468,6 +468,7 @@
         <a class="active" href="#overview"><span class="dot"></span>概览</a>
         <a href="#features"><span class="dot"></span>功能</a>
         <a href="#setup"><span class="dot"></span>配置</a>
+        <a href="#scraper"><span class="dot"></span>刮削</a>
         <a href="#tasks"><span class="dot"></span>任务</a>
         <a href="#watch"><span class="dot"></span>监听</a>
         <a href="/api/dashboard" target="_blank"><span class="dot"></span>API</a>
@@ -578,6 +579,32 @@
           </form>
           <div class="list" id="download-list"></div>
         </article>
+
+        <article class="panel" id="scraper">
+          <div class="panel-header">
+            <h3>AV 刮削验证</h3>
+            <span>JavDB live</span>
+          </div>
+          <form class="form" id="scraper-form">
+            <div class="field">
+              <label for="scraper-number">番号或文件名</label>
+              <input id="scraper-number" name="number" autocomplete="off" placeholder="SSNI-00123">
+            </div>
+            <div class="field">
+              <label for="scraper-media-id">媒体 ID</label>
+              <input id="scraper-media-id" name="media_id" autocomplete="off" placeholder="media_...">
+            </div>
+            <div class="field">
+              <label for="scraper-file-id">媒体文件 ID</label>
+              <input id="scraper-file-id" name="media_file_id" autocomplete="off" placeholder="file_...">
+            </div>
+            <div class="actions">
+              <button class="btn" type="button" id="scraper-parse">解析</button>
+              <button class="btn primary" type="submit">搜索候选</button>
+            </div>
+          </form>
+          <div class="list" id="scraper-results"></div>
+        </article>
       </section>
 
       <section class="grid sections">
@@ -666,6 +693,11 @@
       runWatch: document.querySelector('#run-watch'),
       retryWatch: document.querySelector('#retry-watch')
     };
+    els.scraperForm = document.querySelector('#scraper-form');
+    els.scraperParse = document.querySelector('#scraper-parse');
+    els.scraperResults = document.querySelector('#scraper-results');
+
+    let liveScraperCandidates = [];
 
     async function request(path, options) {
       const response = await fetch(path, options);
@@ -838,6 +870,43 @@
       `).join('') || '<div class="empty">还没有下载目录，可添加 BT/PT 完成目录。</div>';
     }
 
+    function renderScraperParse(parsed) {
+      liveScraperCandidates = [];
+      els.scraperResults.innerHTML = `
+        <section class="list-item">
+          <div class="list-title">
+            <span>${escapeHtml(parsed.normalized || parsed.raw || '--')}</span>
+            ${statusBadge(parsed.kind || 'parsed')}
+          </div>
+          <div class="list-meta">前缀：${escapeHtml(parsed.prefix || '--')} / 数字：${escapeHtml(parsed.digits || '--')}</div>
+          <div class="list-meta">推荐源：${escapeHtml((parsed.preferred_providers || []).join('、') || '--')}</div>
+        </section>
+      `;
+    }
+
+    function renderScraperCandidates(candidates) {
+      liveScraperCandidates = candidates || [];
+      els.scraperResults.innerHTML = liveScraperCandidates.map((item, index) => `
+        <section class="list-item">
+          <div class="list-title">
+            <span>${escapeHtml(item.title || item.external_id || '--')}</span>
+            ${statusBadge(`${item.provider || 'source'} ${item.score || 0}`)}
+          </div>
+          <div class="list-meta">${escapeHtml(item.external_id || '--')} / ${escapeHtml(item.year || '--')}</div>
+          <div class="list-meta">${escapeHtml(item.overview || item.original_title || '--')}</div>
+          <button class="btn primary scraper-save" type="button" data-index="${index}">保存为候选</button>
+        </section>
+      `).join('') || '<div class="empty">没有搜索到候选。</div>';
+    }
+
+    function scraperIDs() {
+      const form = new FormData(els.scraperForm);
+      return {
+        media_id: String(form.get('media_id') || '').trim(),
+        media_file_id: String(form.get('media_file_id') || '').trim()
+      };
+    }
+
     async function load() {
       try {
         setStatus('正在读取服务状态...');
@@ -869,6 +938,65 @@
     els.refresh.addEventListener('click', load);
     els.runWatch.addEventListener('click', () => postAndRefresh('/api/download-directories/watch/run', '运行监听'));
     els.retryWatch.addEventListener('click', () => postAndRefresh('/api/download-directories/watch/retry-failed', '重试近期失败'));
+    els.scraperParse.addEventListener('click', async () => {
+      const form = new FormData(els.scraperForm);
+      const number = String(form.get('number') || '').trim();
+      if (!number) {
+        setStatus('解析失败：番号或文件名必填。', true);
+        return;
+      }
+      try {
+        setStatus('正在解析 AV 番号...');
+        const result = await request(`/api/scrapers/av/parse?number=${encodeURIComponent(number)}`);
+        renderScraperParse(result.parsed || {});
+        setStatus('AV 番号解析完成。');
+      } catch (error) {
+        setStatus(`解析失败：${error.message}`, true);
+      }
+    });
+    els.scraperForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = new FormData(els.scraperForm);
+      const number = String(form.get('number') || '').trim();
+      if (!number) {
+        setStatus('搜索失败：番号或文件名必填。', true);
+        return;
+      }
+      try {
+        setStatus('正在搜索 JavDB 候选...');
+        const result = await request(`/api/scrapers/av/search?number=${encodeURIComponent(number)}&source=javdb`);
+        renderScraperCandidates(result.candidates || []);
+        setStatus(`JavDB 搜索完成，候选 ${result.count || 0} 个。`);
+      } catch (error) {
+        setStatus(`搜索失败：${error.message}`, true);
+      }
+    });
+    els.scraperResults.addEventListener('click', async event => {
+      const button = event.target.closest('.scraper-save');
+      if (!button) return;
+      const candidate = liveScraperCandidates[Number(button.dataset.index)];
+      const ids = scraperIDs();
+      if (!candidate) {
+        setStatus('保存失败：候选不存在。', true);
+        return;
+      }
+      if (!ids.media_id && !ids.media_file_id) {
+        setStatus('保存失败：请先填写媒体 ID 或媒体文件 ID。', true);
+        return;
+      }
+      try {
+        setStatus('正在保存候选...');
+        await jsonRequest('/api/scrapers/av/candidates', {
+          ...ids,
+          source: candidate.provider || 'javdb',
+          candidate
+        });
+        await load();
+        setStatus('候选已保存到 scrape_candidates。');
+      } catch (error) {
+        setStatus(`保存候选失败：${error.message}`, true);
+      }
+    });
     els.libraryForm.addEventListener('submit', async event => {
       event.preventDefault();
       const form = new FormData(els.libraryForm);

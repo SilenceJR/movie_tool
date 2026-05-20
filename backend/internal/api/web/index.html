@@ -1115,7 +1115,8 @@
         await jsonRequest('/api/scrapers/av/candidates', {
           ...ids,
           source: candidate.provider || els.scraperSource.value || 'javdb',
-          candidate
+          candidate,
+          metadata: candidate.metadata || null
         });
         await load();
         setStatus('候选已保存到 scrape_candidates。');

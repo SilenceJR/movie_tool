@@ -2581,6 +2581,7 @@ type saveScraperCandidateRequest struct {
 	MediaID     string            `json:"media_id"`
 	Source      string            `json:"source"`
 	Candidate   scraper.Candidate `json:"candidate"`
+	Metadata    *scraper.Metadata `json:"metadata"`
 	RawPayload  string            `json:"raw_payload"`
 }
 
@@ -2602,6 +2603,16 @@ func (s *Server) handleSaveScraperCandidate(w http.ResponseWriter, r *http.Reque
 	if provider == scraper.AVProvider {
 		provider = firstNonEmpty(request.Source, scraper.JavDBProvider)
 	}
+	rawPayload := request.RawPayload
+	if rawPayload == "" && request.Metadata != nil {
+		if payload, err := json.Marshal(map[string]any{
+			"candidate": request.Candidate,
+			"metadata":  request.Metadata,
+			"source":    provider,
+		}); err == nil {
+			rawPayload = string(payload)
+		}
+	}
 	input := scraper.CandidateInput{
 		MediaFileID:   request.MediaFileID,
 		MediaID:       request.MediaID,
@@ -2614,7 +2625,19 @@ func (s *Server) handleSaveScraperCandidate(w http.ResponseWriter, r *http.Reque
 		Overview:      request.Candidate.Overview,
 		Score:         request.Candidate.Score,
 		ScoreReasons:  append([]string(nil), request.Candidate.ScoreReasons...),
-		RawPayload:    request.RawPayload,
+		RawPayload:    rawPayload,
+	}
+	if request.Metadata != nil {
+		input.Title = firstNonEmpty(request.Metadata.Title, input.Title)
+		input.OriginalTitle = firstNonEmpty(request.Metadata.OriginalTitle, input.OriginalTitle)
+		if input.OriginalTitle == "" {
+			input.OriginalTitle = firstNonEmpty(request.Metadata.DisplayTitle, input.Title)
+		}
+		if request.Metadata.Year > 0 {
+			input.Year = request.Metadata.Year
+		}
+		input.PosterURL = firstNonEmpty(request.Metadata.PosterURL, input.PosterURL)
+		input.Overview = firstNonEmpty(request.Metadata.Overview, input.Overview)
 	}
 	if err := s.scoreScrapeCandidate(r.Context(), &input); err != nil {
 		writeError(w, http.StatusInternalServerError, err)

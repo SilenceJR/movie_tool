@@ -486,6 +486,54 @@ func TestSaveLiveScraperCandidate(t *testing.T) {
 	}
 }
 
+func TestSaveLiveScraperCandidateWithFetchedMetadata(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/scrapers/av/candidates", bytes.NewBufferString(`{
+		"media_id": "media-1",
+		"source": "javbus",
+		"candidate": {
+			"provider": "javbus",
+			"external_id": "javbus:/SSNI-00123",
+			"title": "SSNI-00123 Search Title",
+			"year": 2019,
+			"poster_url": "https://www.javbus.com/search.jpg",
+			"score": 90
+		},
+		"metadata": {
+			"provider": "javbus",
+			"external_id": "javbus:/SSNI-00123",
+			"number": "SSNI-00123",
+			"title": "SSNI-00123",
+			"original_title": "SSNI-00123 Detail Title",
+			"display_title": "Detail Title",
+			"year": 2020,
+			"poster_url": "https://www.javbus.com/detail.jpg",
+			"overview": "Detail overview"
+		}
+	}`))
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201 save candidate, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	candidate := body["candidate"].(map[string]any)
+	if candidate["title"] != "SSNI-00123" || candidate["original_title"] != "SSNI-00123 Detail Title" || candidate["year"] != float64(2020) {
+		t.Fatalf("expected metadata-enriched candidate, got %#v", candidate)
+	}
+	if candidate["poster_url"] != "https://www.javbus.com/detail.jpg" || candidate["overview"] != "Detail overview" {
+		t.Fatalf("expected metadata media fields, got %#v", candidate)
+	}
+	rawPayload, ok := candidate["raw_payload"].(string)
+	if !ok || !strings.Contains(rawPayload, `"metadata"`) || !strings.Contains(rawPayload, `"Detail overview"`) {
+		t.Fatalf("expected auto raw payload with metadata, got %#v", candidate)
+	}
+}
+
 func TestCreateAndListLibraries(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

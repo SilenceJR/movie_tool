@@ -121,7 +121,7 @@ backend/internal/task         任务系统
 - 已有 AV 番号解析器，用于 live scraper 前置路由；可归一化标准番号、FC2、HEYZO、CARIB/1PONDO/10MUSUME，并返回推荐 provider 顺序。
 - 已有 JavDB live provider，用纯 Go HTTP 与 HTML 解析实现搜索页候选和详情页 metadata 提取；详情会映射发行日期、时长、演员、片商、系列、标签，接口默认只验证数据可获取，不写入数据库。
 - 已有 JavBus live provider 第一版，用纯 Go HTTP 与 HTML 解析实现搜索页候选和详情页 metadata 提取；详情会映射发行日期、时长、演员、片商、系列、标签，接口默认只验证数据可获取，不写入数据库。
-- 已有 live candidate 显式保存入口，会把用户确认过的 live 候选写入 `scrape_candidates`，并复用自动评分与 `match_status` 刷新。
+- 已有 live candidate 显式保存入口，会把用户确认过的 live 候选写入 `scrape_candidates`，并复用自动评分与 `match_status` 刷新；如果控制台已先拉取详情，保存时会用详情页 metadata 补强标题、年份、封面、简介，并把候选与详情原文写入 `raw_payload` 便于后续回放和排错。
 - 已有轻量候选评分规则：番号精确匹配、标题相似度、年份匹配/冲突，并输出 0-100 分与原因。
 - 创建候选时，如果提供 `media_file_id` 且未提供完整分数，会读取已入库文件的 parsed title/year/number 自动评分。
 - 候选创建后会基于当前候选列表刷新未锁定作品的 `match_status`，人工选择候选后会应用标题、年份、简介、本地化元数据和 `external_ids`；空候选字段不会覆盖作品已有元数据。

@@ -2526,6 +2526,8 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 			s.handleSearchAVScraper(w, r)
 		case "fetch":
 			s.handleFetchAVScraper(w, r)
+		case "verify":
+			s.handleVerifyAVScraper(w, r)
 		case "candidates":
 			s.handleSaveScraperCandidate(w, r, provider)
 		default:
@@ -2688,6 +2690,84 @@ func (s *Server) handleFetchAVScraper(w http.ResponseWriter, r *http.Request) {
 		s.handleFetchJavBusScraper(w, r)
 	default:
 		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
+	}
+}
+
+func (s *Server) handleVerifyAVScraper(w http.ResponseWriter, r *http.Request) {
+	value := firstNonEmpty(r.URL.Query().Get("number"), r.URL.Query().Get("title"), r.URL.Query().Get("filename"))
+	parsed, ok := scraper.ParseAVNumber(value)
+	if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("av number could not be parsed"))
+		return
+	}
+	requested := firstNonEmpty(r.URL.Query().Get("source"), scraper.AVSourceAuto)
+	source, skipped, ok := scraper.SelectAVLiveSource(parsed, requested)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
+		return
+	}
+	selection := map[string]any{
+		"requested":                     requested,
+		"selected":                      source,
+		"skipped_unimplemented_sources": skipped,
+	}
+	candidates, err := s.searchAVCandidates(r.Context(), source, scraper.SearchQuery{MediaType: "av", Number: parsed.Normalized})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(candidates) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"provider":         scraper.AVProvider,
+			"source":           source,
+			"media_type":       "av",
+			"persisted":        false,
+			"verified":         false,
+			"parsed":           parsed,
+			"source_selection": selection,
+			"count":            0,
+			"candidates":       candidates,
+		})
+		return
+	}
+	metadata, err := s.fetchAVMetadata(r.Context(), source, candidates[0].ExternalID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":         scraper.AVProvider,
+		"source":           source,
+		"media_type":       "av",
+		"persisted":        false,
+		"verified":         true,
+		"parsed":           parsed,
+		"source_selection": selection,
+		"count":            len(candidates),
+		"candidate":        candidates[0],
+		"metadata":         metadata,
+	})
+}
+
+func (s *Server) searchAVCandidates(ctx context.Context, source string, query scraper.SearchQuery) ([]scraper.Candidate, error) {
+	switch source {
+	case scraper.JavDBProvider:
+		return s.javdbClient().Search(ctx, query)
+	case scraper.JavBusProvider:
+		return s.javbusClient().Search(ctx, query)
+	default:
+		return nil, fmt.Errorf("av source %q is not implemented yet", source)
+	}
+}
+
+func (s *Server) fetchAVMetadata(ctx context.Context, source string, externalID string) (*scraper.Metadata, error) {
+	switch source {
+	case scraper.JavDBProvider:
+		return s.javdbClient().FetchByID(ctx, externalID)
+	case scraper.JavBusProvider:
+		return s.javbusClient().FetchByID(ctx, externalID)
+	default:
+		return nil, fmt.Errorf("av source %q is not implemented yet", source)
 	}
 }
 

@@ -608,6 +608,7 @@
             </div>
             <div class="actions">
               <button class="btn" type="button" id="scraper-parse">解析</button>
+              <button class="btn" type="button" id="scraper-verify">一键验证</button>
               <button class="btn" type="button" id="scraper-load">加载候选</button>
               <button class="btn primary" type="submit">搜索候选</button>
             </div>
@@ -704,6 +705,7 @@
     };
     els.scraperForm = document.querySelector('#scraper-form');
     els.scraperParse = document.querySelector('#scraper-parse');
+    els.scraperVerify = document.querySelector('#scraper-verify');
     els.scraperLoad = document.querySelector('#scraper-load');
     els.scraperResults = document.querySelector('#scraper-results');
     els.scraperSource = document.querySelector('#scraper-source');
@@ -1010,6 +1012,31 @@
         setStatus('AV 番号解析完成。');
       } catch (error) {
         setStatus(`解析失败：${error.message}`, true);
+      }
+    });
+    els.scraperVerify.addEventListener('click', async () => {
+      const form = new FormData(els.scraperForm);
+      const number = String(form.get('number') || '').trim();
+      const source = String(form.get('source') || 'auto').trim();
+      if (!number) {
+        setStatus('验证失败：番号或文件名必填。', true);
+        return;
+      }
+      try {
+        setStatus(`正在验证 ${scraperSourceName(source)} 数据闭环...`);
+        const result = await request(`/api/scrapers/av/verify?number=${encodeURIComponent(number)}&source=${encodeURIComponent(source)}`);
+        if (!result.verified) {
+          liveScraperCandidates = result.candidates || [];
+          renderScraperCandidates(liveScraperCandidates);
+          setStatus(`${scraperSourceName(result.source || source)} 未找到可验证候选。`);
+          return;
+        }
+        const candidate = result.candidate || {};
+        candidate.metadata = result.metadata || {};
+        renderScraperCandidates([candidate]);
+        setStatus(`${scraperSourceName(result.source || source)} 验证完成，已获取首个候选详情。`);
+      } catch (error) {
+        setStatus(`验证失败：${error.message}`, true);
       }
     });
     els.scraperLoad.addEventListener('click', async () => {

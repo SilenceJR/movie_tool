@@ -12,6 +12,7 @@ GET /api/scrapers/av/parse?number=FC2-PPV-1234567
 GET /api/scrapers/av/search?number=FC2-PPV-1234567&source=auto
 GET /api/scrapers/av/search?number=SSNI-00123&source=javdb
 GET /api/scrapers/av/search?number=SSNI-00123&source=javbus
+GET /api/scrapers/av/verify?number=SSNI-00123&source=auto
 GET /api/scrapers/av/fetch?external_id=javdb:/v/example&source=javdb
 GET /api/scrapers/av/fetch?external_id=javbus:/SSNI-00123&source=javbus
 POST /api/scrapers/av/candidates
@@ -22,9 +23,10 @@ GET /api/scrapers/tmdb/fetch?media_type=movie&external_id=27205&language=zh-CN
 `tmdb` 使用 `TMDB_API_KEY` 鉴权，`TMDB_BASE_URL` 默认 `https://api.themoviedb.org`。搜索/详情接口默认只验证远端可获取和字段映射，不直接写入 `scrape_candidates`，后续由显式“保存候选/选择候选”流程入库。
 `av/parse` 已支持番号归一化和源路由验证，返回 `normalized`、`kind`、`prefix`、`digits`、`preferred_providers`，为后续逐平台 live search/fetch 提供稳定入口。
 `av/search` 支持 `source=auto`，会按番号推荐源选择当前已实现的 live 源；例如 FC2 会先记录跳过未实现的 `fc2`，再兜底到 JavDB/JavBus 等已接入源做可获取性验证，并在响应的 `source_selection` 中返回实际选择和跳过原因。
+`av/verify` 会执行“解析番号 -> 自动/指定源搜索 -> 拉取首个候选详情”的验证闭环，返回 `parsed`、`candidate`、`metadata` 与 `verified`，默认不写入数据库。
 `av/search` 与 `av/fetch` 已接入第一版 JavDB HTML 源解析，`JAVDB_BASE_URL` 默认 `https://javdb.com`；该实现用于验证搜索页/详情页可获取与字段映射，可返回标准番号、封面、发行日期、时长、演员、片商、系列、标签等结构化字段，默认不写入数据库。
 `source=javbus` 已接入第一版 JavBus HTML 源解析，`JAVBUS_BASE_URL` 默认 `https://www.javbus.com`；当前用于验证搜索页/详情页可获取和字段映射，可返回标准番号、封面、发行日期、时长、演员、片商、系列、标签等字段，默认不写入数据库。
-内置控制台的 AV 刮削验证面板已支持在 JavDB/JavBus 间切换数据源；搜索候选后可先拉取详情验证字段映射，再由用户显式保存为 `scrape_candidates`。
+内置控制台的 AV 刮削验证面板已支持在 JavDB/JavBus 间切换数据源；可一键验证首个候选详情，也可搜索候选后手动拉取详情验证字段映射，再由用户显式保存为 `scrape_candidates`。
 `POST /api/scrapers/{provider}/candidates` 用于显式保存已经验证过的 live candidate，必须绑定 `media_id` 或 `media_file_id`，并复用现有候选评分和匹配状态刷新流程；请求可携带 `metadata`，服务会优先用详情页的标题、年份、封面和简介补强候选，并在未显式传 `raw_payload` 时保留 candidate + metadata 原文。
 
 ### 普通媒体

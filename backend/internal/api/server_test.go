@@ -370,6 +370,52 @@ func TestFetchAVScraperUsesJavDB(t *testing.T) {
 	}
 }
 
+func TestVerifyAVScraperSearchesAndFetchesFirstCandidate(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/search/SSNI-00123":
+			return jsonResponse(`
+				<a class="movie-box" href="/SSNI-00123">
+					<img src="/pics/ssni.jpg">
+					<div class="photo-info">SSNI-00123 Example Title</div>
+					<div>2020-02-03</div>
+				</a>
+			`), nil
+		case "/SSNI-00123":
+			return jsonResponse(`
+				<h3>SSNI-00123 Example Title</h3>
+				<img src="/pics/ssni-detail.jpg">
+				<p><span>發行日期:</span> 2020-02-03</p>
+				<p><span>長度:</span> 120分鐘</p>
+				<p><span>製作商:</span><a>Example Studio</a></p>
+			`), nil
+		default:
+			t.Fatalf("unexpected verify request %s", r.URL.String())
+			return nil, nil
+		}
+	})}
+	server := NewServerWithDependencies(config.Config{Host: "127.0.0.1", Port: "0", JavBusBaseURL: "https://javbus.test"}, Dependencies{ScraperHTTP: client})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/av/verify?number=ssni00123&source=javbus", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 av verify, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["verified"] != true || body["persisted"] != false || body["source"] != "javbus" {
+		t.Fatalf("unexpected verify response: %#v", body)
+	}
+	candidate := body["candidate"].(map[string]any)
+	metadata := body["metadata"].(map[string]any)
+	if candidate["external_id"] != "javbus:/SSNI-00123" || metadata["poster_url"] != "https://www.javbus.com/pics/ssni-detail.jpg" {
+		t.Fatalf("unexpected verify payload: candidate=%#v metadata=%#v", candidate, metadata)
+	}
+}
+
 func TestSearchAVScraperUsesJavBus(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/search/SSNI-00123" {

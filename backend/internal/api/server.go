@@ -903,10 +903,15 @@ func (s *Server) handleRunDownloadDirectoryWatch(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options downloadScanOptions) (downloadDirectoryWatchRun, error) {
+	startedAt := time.Now().UTC()
 	if !s.downloadWatchMu.TryLock() {
+		completedAt := time.Now().UTC()
 		return downloadDirectoryWatchRun{
-			Skipped:    true,
-			SkipReason: "download watch is already running",
+			Skipped:     true,
+			SkipReason:  "download watch is already running",
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
+			DurationMS:  completedAt.Sub(startedAt).Milliseconds(),
 		}, nil
 	}
 	defer s.downloadWatchMu.Unlock()
@@ -925,6 +930,11 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 
 	results := make([]downloadDirectoryScanResult, 0, len(directories))
 	failures := make([]downloadDirectoryWatchFailure, 0)
+	summary := make([]downloadDirectoryWatchSummary, 0, len(directories))
+	totalDiscovered := 0
+	totalImported := 0
+	totalFailedFiles := 0
+	planCount := 0
 	for _, directory := range directories {
 		result, status, err := s.scanDownloadDirectory(ctx, directory, options)
 		if err != nil {
@@ -936,22 +946,58 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 				Status:            status,
 				Error:             err.Error(),
 			})
+			summary = append(summary, downloadDirectoryWatchSummary{
+				DownloadDirectoryID:   directory.ID,
+				DownloadDirectoryName: directory.Name,
+				Path:                  directory.Path,
+				Status:                "failed",
+				StatusCode:            status,
+				Error:                 err.Error(),
+			})
 			continue
 		}
 		results = append(results, result)
+		totalDiscovered += len(result.Files)
+		totalImported += len(result.Imported)
+		totalFailedFiles += len(result.Failed)
+		if result.OrganizerPlan != nil {
+			planCount++
+		}
+		summary = append(summary, downloadDirectoryWatchSummary{
+			DownloadDirectoryID:   directory.ID,
+			DownloadDirectoryName: directory.Name,
+			Path:                  directory.Path,
+			Status:                "succeeded",
+			TaskID:                result.Task.ID,
+			DiscoveredCount:       len(result.Files),
+			ImportedCount:         len(result.Imported),
+			FailedFileCount:       len(result.Failed),
+			BatchCount:            result.BatchCount,
+			OrganizerPlanID:       organizerPlanID(result.OrganizerPlan),
+		})
 	}
 	if taskRecord != nil {
-		message := fmt.Sprintf("download watch scanned %d directories, failed %d", len(results), len(failures))
+		message := fmt.Sprintf("download watch scanned %d directories, imported %d files, failed directories %d, failed files %d", len(results), totalImported, len(failures), totalFailedFiles)
 		completed, _ := s.tasks.Succeed(taskRecord.ID, message)
 		taskRecord = &completed
 	}
+	completedAt := time.Now().UTC()
 	return downloadDirectoryWatchRun{
 		Task:                taskRecord,
 		DownloadDirectories: directories,
 		Results:             results,
 		Failed:              failures,
+		Summary:             summary,
 		Count:               len(results),
 		FailureCount:        len(failures),
+		TotalDirectories:    len(directories),
+		TotalDiscovered:     totalDiscovered,
+		TotalImported:       totalImported,
+		TotalFailedFiles:    totalFailedFiles,
+		OrganizerPlanCount:  planCount,
+		StartedAt:           startedAt,
+		CompletedAt:         completedAt,
+		DurationMS:          completedAt.Sub(startedAt).Milliseconds(),
 	}, nil
 }
 
@@ -967,10 +1013,34 @@ type downloadDirectoryWatchRun struct {
 	DownloadDirectories []download.Directory            `json:"download_directories"`
 	Results             []downloadDirectoryScanResult   `json:"results"`
 	Failed              []downloadDirectoryWatchFailure `json:"failed"`
+	Summary             []downloadDirectoryWatchSummary `json:"summary"`
 	Count               int                             `json:"count"`
 	FailureCount        int                             `json:"failure_count"`
+	TotalDirectories    int                             `json:"total_directories"`
+	TotalDiscovered     int                             `json:"total_discovered"`
+	TotalImported       int                             `json:"total_imported"`
+	TotalFailedFiles    int                             `json:"total_failed_files"`
+	OrganizerPlanCount  int                             `json:"organizer_plan_count"`
+	StartedAt           time.Time                       `json:"started_at"`
+	CompletedAt         time.Time                       `json:"completed_at"`
+	DurationMS          int64                           `json:"duration_ms"`
 	Skipped             bool                            `json:"skipped,omitempty"`
 	SkipReason          string                          `json:"skip_reason,omitempty"`
+}
+
+type downloadDirectoryWatchSummary struct {
+	DownloadDirectoryID   string `json:"download_directory_id"`
+	DownloadDirectoryName string `json:"download_directory_name"`
+	Path                  string `json:"path"`
+	Status                string `json:"status"`
+	StatusCode            int    `json:"status_code,omitempty"`
+	Error                 string `json:"error,omitempty"`
+	TaskID                string `json:"task_id,omitempty"`
+	DiscoveredCount       int    `json:"discovered_count"`
+	ImportedCount         int    `json:"imported_count"`
+	FailedFileCount       int    `json:"failed_file_count"`
+	BatchCount            int    `json:"batch_count"`
+	OrganizerPlanID       string `json:"organizer_plan_id,omitempty"`
 }
 
 type downloadDirectoryScanResult struct {
@@ -989,6 +1059,13 @@ type downloadDirectoryWatchFailure struct {
 	DownloadDirectory download.Directory `json:"download_directory"`
 	Status            int                `json:"status"`
 	Error             string             `json:"error"`
+}
+
+func organizerPlanID(plan *organizer.Plan) string {
+	if plan == nil {
+		return ""
+	}
+	return plan.ID
 }
 
 func parseDownloadScanOptions(r *http.Request) (downloadScanOptions, error) {

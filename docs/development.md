@@ -56,6 +56,7 @@ backend/internal/task         任务系统
 - 已有 `/api/download-directories` CRUD、`/api/download-directories/{id}/scan` 和 `/api/download-directories/watch/run`；下载目录可绑定目标媒体库和默认整理规则，扫描完成目录文件并作为待整理来源入库，且可用 `min_stable_seconds` 跳过仍在写入的近期文件；扫描时传入 `organizer_rule_id` 可覆盖目录默认规则，并同步生成限定该下载目录来源的整理 dry-run。
 - 下载目录监听运行入口会只处理同时 `enabled` 和 `watch_enabled` 的目录，并复用单目录扫描、批量入库、失败隔离与可选整理计划生成逻辑；生产入口已启动后台轮询器，轮询间隔与稳定时间可通过环境变量配置，默认每 5 分钟触发一次，且跳过 2 分钟内仍在变化的文件。
 - 每次下载目录监听批次会生成 `download_watch` 父任务，记录扫描目录数量与失败摘要；具体目录扫描仍保留各自的 `library_scan` 子任务记录。
+- 下载目录监听响应已包含批次级 `summary`、总目录数、发现/入库/失败文件数、整理计划数、开始/完成时间与耗时；每个目录会给出 succeeded/failed、子任务、导入数量、失败数量和整理计划 ID，便于前端任务中心与自动化观测。
 - 下载目录监听批次已增加进程内去重保护；如果上一轮仍在运行，新的手动或后台触发会返回 skipped 状态，避免重复扫描与重复生成整理计划。
 - 已有 `/api/automations` CRUD、pause、resume、run、runs 和 run-due；生产入口使用 SQL store，手动 run 或 due tick 会创建 task 与 automation_run。
 - 已有 `/api/scrape-candidates` 与 `/api/scrape-decisions`；候选可基于已扫描 `media_file` 的解析字段自动评分，并刷新作品 `match_status`。
@@ -109,9 +110,8 @@ backend/internal/task         任务系统
 ## 4. 下一步建议
 
 ```text
-1. 为下载目录监听增加更细的运行状态观测、失败重试和批量合并。
+1. 为下载目录监听增加失败重试和批量合并。
 2. 为下载目录监听增加事件去抖。
-3. 为扫描任务失败文件重试增加更细的筛选条件。
-4. 为 organizer 执行结果增加更细的失败恢复。
-5. 为批量 organizer plan 增加冲突批量确认覆盖处理。
+3. 为 organizer 执行结果增加更细的失败恢复。
+4. 为批量 organizer plan 增加更细的冲突筛选与局部确认能力。
 ```

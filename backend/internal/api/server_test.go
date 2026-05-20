@@ -2022,6 +2022,9 @@ func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T)
 	if body["count"] != float64(1) || body["failure_count"] != float64(0) {
 		t.Fatalf("expected one successful watch scan and no failures, got %#v", body)
 	}
+	if body["total_directories"] != float64(1) || body["total_discovered"] != float64(1) || body["total_imported"] != float64(1) || body["organizer_plan_count"] != float64(1) {
+		t.Fatalf("expected aggregate watch counters, got %#v", body)
+	}
 	taskBody := body["task"].(map[string]any)
 	if taskBody["type"] != "download_watch" || taskBody["status"] != "succeeded" {
 		t.Fatalf("expected succeeded download_watch parent task, got %#v", taskBody)
@@ -2042,6 +2045,54 @@ func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T)
 	actions := plan["actions"].([]any)
 	if len(actions) != 1 || actions[0].(map[string]any)["source_path"] != watchedPath {
 		t.Fatalf("expected default organizer rule to create plan for watched file, got %#v", plan)
+	}
+	summary := body["summary"].([]any)
+	if len(summary) != 1 {
+		t.Fatalf("expected one watch summary entry, got %#v", summary)
+	}
+	summaryEntry := summary[0].(map[string]any)
+	if summaryEntry["download_directory_id"] != watchedDir["id"] || summaryEntry["status"] != "succeeded" || summaryEntry["imported_count"] != float64(1) {
+		t.Fatalf("expected succeeded watch summary entry, got %#v", summaryEntry)
+	}
+	if summaryEntry["organizer_plan_id"] != plan["id"] {
+		t.Fatalf("expected summary to expose organizer plan id, got %#v", summaryEntry)
+	}
+}
+
+func TestRunDownloadDirectoryWatchReportsDirectoryFailures(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+t.TempDir()+`"}`)
+	missingRoot := filepath.Join(t.TempDir(), "missing")
+	directory := createJSON(t, server, "/api/download-directories", `{
+		"name":"Missing download",
+		"path":"`+missingRoot+`",
+		"library_id":"`+library["id"].(string)+`",
+		"action_mode":"copy",
+		"enabled":true,
+		"watch_enabled":true
+	}`)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/download-directories/watch/run", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 watch run with failed directory, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["count"] != float64(0) || body["failure_count"] != float64(1) || body["total_directories"] != float64(1) {
+		t.Fatalf("expected failed directory counters, got %#v", body)
+	}
+	summary := body["summary"].([]any)
+	if len(summary) != 1 {
+		t.Fatalf("expected one failed watch summary entry, got %#v", summary)
+	}
+	summaryEntry := summary[0].(map[string]any)
+	if summaryEntry["download_directory_id"] != directory["id"] || summaryEntry["status"] != "failed" || summaryEntry["status_code"] != float64(http.StatusBadRequest) || summaryEntry["error"] == "" {
+		t.Fatalf("expected failed watch summary entry, got %#v", summaryEntry)
 	}
 }
 

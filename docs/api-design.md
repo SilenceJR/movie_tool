@@ -64,6 +64,8 @@ POST /api/organizer/plans/{id}/rollback
 }
 ```
 
+`POST /api/download-directories/watch/run` 会返回批次观测字段：`summary`、`total_directories`、`total_discovered`、`total_imported`、`total_failed_files`、`organizer_plan_count`、`started_at`、`completed_at`、`duration_ms`。`summary` 中每个目录包含目录 ID/名称/path、`status`、子任务 ID、发现/导入/失败文件数、批次数、整理计划 ID；目录扫描失败时包含 HTTP 状态码与错误信息。
+
 ## 5. 媒体
 
 ```http

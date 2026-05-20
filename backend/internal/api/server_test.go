@@ -301,6 +301,10 @@ func TestFetchAVScraperUsesJavDB(t *testing.T) {
 			<h2>SSNI-00123 Example Title</h2>
 			<div class="release-date">2020-02-03</div>
 			<div class="description">Example overview</div>
+			<div class="field"><strong>時長:</strong><span>120 分鐘</span></div>
+			<div class="field"><strong>片商:</strong><a>Example Studio</a></div>
+			<div class="field"><strong>演員:</strong><a>Alice</a><a>Bob</a></div>
+			<div class="field"><strong>類別:</strong><a>Drama</a><a>高清</a></div>
 		`), nil
 	})}
 	server := NewServerWithDependencies(config.Config{Host: "127.0.0.1", Port: "0", JavDBBaseURL: "https://javdb.test"}, Dependencies{ScraperHTTP: client})
@@ -318,6 +322,13 @@ func TestFetchAVScraperUsesJavDB(t *testing.T) {
 	metadata := body["metadata"].(map[string]any)
 	if metadata["provider"] != "javdb" || metadata["title"] != "SSNI-00123" || metadata["year"] != float64(2020) {
 		t.Fatalf("unexpected javdb metadata: %#v", metadata)
+	}
+	if metadata["runtime_minutes"] != float64(120) || metadata["studio"] != "Example Studio" {
+		t.Fatalf("unexpected javdb structured metadata: %#v", metadata)
+	}
+	actors := metadata["actors"].([]any)
+	if actors[0] != "Alice" || actors[1] != "Bob" {
+		t.Fatalf("unexpected javdb actors: %#v", actors)
 	}
 }
 

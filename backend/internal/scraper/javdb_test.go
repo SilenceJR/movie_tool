@@ -52,6 +52,12 @@ func TestJavDBFetchParsesMetadata(t *testing.T) {
 				<h2>SSNI-00123 Example Title</h2>
 				<div class="release-date">2020-02-03</div>
 				<div class="description">Example overview</div>
+				<div class="field"><strong>日期:</strong><span>2020-02-03</span></div>
+				<div class="field"><strong>時長:</strong><span>120 分鐘</span></div>
+				<div class="field"><strong>片商:</strong><a>Example Studio</a></div>
+				<div class="field"><strong>系列:</strong><a>Example Series</a></div>
+				<div class="field"><strong>演員:</strong><a>Alice</a><a>Bob</a></div>
+				<div class="field"><strong>類別:</strong><a>Drama</a><a>高清</a></div>
 			`), nil
 		})},
 	}
@@ -65,6 +71,12 @@ func TestJavDBFetchParsesMetadata(t *testing.T) {
 	}
 	if metadata.DisplayTitle != "Example Title" || metadata.Overview != "Example overview" {
 		t.Fatalf("unexpected metadata text fields: %#v", metadata)
+	}
+	if metadata.ReleaseDate != "2020-02-03" || metadata.RuntimeMinutes != 120 || metadata.Studio != "Example Studio" || metadata.Series != "Example Series" {
+		t.Fatalf("unexpected metadata structured fields: %#v", metadata)
+	}
+	if strings.Join(metadata.Actors, ",") != "Alice,Bob" || strings.Join(metadata.Tags, ",") != "Drama,高清" {
+		t.Fatalf("unexpected metadata people/tags: %#v", metadata)
 	}
 }
 

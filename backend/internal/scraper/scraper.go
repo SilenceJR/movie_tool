@@ -23,14 +23,20 @@ type Candidate struct {
 }
 
 type Metadata struct {
-	Provider      string `json:"provider"`
-	ExternalID    string `json:"external_id"`
-	Title         string `json:"title"`
-	OriginalTitle string `json:"original_title"`
-	DisplayTitle  string `json:"display_title"`
-	Language      string `json:"language"`
-	Overview      string `json:"overview"`
-	Year          int    `json:"year"`
+	Provider       string   `json:"provider"`
+	ExternalID     string   `json:"external_id"`
+	Title          string   `json:"title"`
+	OriginalTitle  string   `json:"original_title"`
+	DisplayTitle   string   `json:"display_title"`
+	Language       string   `json:"language"`
+	Overview       string   `json:"overview"`
+	Year           int      `json:"year"`
+	ReleaseDate    string   `json:"release_date,omitempty"`
+	RuntimeMinutes int      `json:"runtime_minutes,omitempty"`
+	Studio         string   `json:"studio,omitempty"`
+	Series         string   `json:"series,omitempty"`
+	Actors         []string `json:"actors,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
 }
 
 type Scraper interface {

@@ -583,9 +583,16 @@
         <article class="panel" id="scraper">
           <div class="panel-header">
             <h3>AV 刮削验证</h3>
-            <span>JavDB live</span>
+            <span>JavDB / JavBus live</span>
           </div>
           <form class="form" id="scraper-form">
+            <div class="field">
+              <label for="scraper-source">数据源</label>
+              <select id="scraper-source" name="source">
+                <option value="javdb">JavDB</option>
+                <option value="javbus">JavBus</option>
+              </select>
+            </div>
             <div class="field">
               <label for="scraper-number">番号或文件名</label>
               <input id="scraper-number" name="number" autocomplete="off" placeholder="SSNI-00123">
@@ -698,8 +705,14 @@
     els.scraperParse = document.querySelector('#scraper-parse');
     els.scraperLoad = document.querySelector('#scraper-load');
     els.scraperResults = document.querySelector('#scraper-results');
+    els.scraperSource = document.querySelector('#scraper-source');
 
     let liveScraperCandidates = [];
+
+    function scraperSourceName(source) {
+      if (source === 'javbus') return 'JavBus';
+      return 'JavDB';
+    }
 
     async function request(path, options) {
       const response = await fetch(path, options);
@@ -994,15 +1007,17 @@
       event.preventDefault();
       const form = new FormData(els.scraperForm);
       const number = String(form.get('number') || '').trim();
+      const source = String(form.get('source') || 'javdb').trim();
       if (!number) {
         setStatus('搜索失败：番号或文件名必填。', true);
         return;
       }
       try {
-        setStatus('正在搜索 JavDB 候选...');
-        const result = await request(`/api/scrapers/av/search?number=${encodeURIComponent(number)}&source=javdb`);
+        const sourceName = scraperSourceName(source);
+        setStatus(`正在搜索 ${sourceName} 候选...`);
+        const result = await request(`/api/scrapers/av/search?number=${encodeURIComponent(number)}&source=${encodeURIComponent(source)}`);
         renderScraperCandidates(result.candidates || []);
-        setStatus(`JavDB 搜索完成，候选 ${result.count || 0} 个。`);
+        setStatus(`${sourceName} 搜索完成，候选 ${result.count || 0} 个。`);
       } catch (error) {
         setStatus(`搜索失败：${error.message}`, true);
       }
@@ -1050,7 +1065,7 @@
         setStatus('正在保存候选...');
         await jsonRequest('/api/scrapers/av/candidates', {
           ...ids,
-          source: candidate.provider || 'javdb',
+          source: candidate.provider || els.scraperSource.value || 'javdb',
           candidate
         });
         await load();

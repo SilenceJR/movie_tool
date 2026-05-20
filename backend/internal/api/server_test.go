@@ -1284,6 +1284,53 @@ func TestImportScannedFilesContinueOnError(t *testing.T) {
 	}
 }
 
+func TestRetryFailedMediaFile(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "Arrival.2016.1080p.WEB-DL.mkv")
+	if err := os.WriteFile(filePath, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+	failed, err := server.mediaFiles.MarkFileFailed(context.Background(), media.FailedFileInput{
+		LibraryID:         library["id"].(string),
+		Path:              filePath,
+		DetectedMediaType: "movie",
+		ParsedTitle:       "Arrival",
+		ParsedYear:        2016,
+		Error:             "previous import failed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/media-files/"+failed.ID+"/retry", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 retry failed file, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["count"] != float64(1) {
+		t.Fatalf("expected one imported file, got %#v", body)
+	}
+	updated, ok, err := server.mediaFiles.GetFile(context.Background(), failed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected retried file to exist")
+	}
+	if updated.Status != media.FileStatusAvailable || updated.FailureError != "" || updated.FailedAt != nil {
+		t.Fatalf("expected retry to clear failure state, got %#v", updated)
+	}
+}
+
 func TestScanLibraryMarksMissingFiles(t *testing.T) {
 	root := t.TempDir()
 	keepPath := filepath.Join(root, "Keep.2020.mkv")

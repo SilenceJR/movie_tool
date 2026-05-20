@@ -212,6 +212,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/download-directories/", s.handleDownloadDirectoryAction)
 	s.mux.HandleFunc("DELETE /api/download-directories/", s.handleDeleteDownloadDirectory)
 	s.mux.HandleFunc("GET /api/media-files", s.handleListMediaFiles)
+	s.mux.HandleFunc("POST /api/media-files/", s.handleMediaFileAction)
 	s.mux.HandleFunc("GET /api/media", s.handleListMedia)
 	s.mux.HandleFunc("POST /api/media", s.handleCreateMedia)
 	s.mux.HandleFunc("GET /api/media/", s.handleGetMedia)
@@ -1451,6 +1452,103 @@ func (s *Server) handleListMediaFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, files)
+}
+
+func (s *Server) handleMediaFileAction(w http.ResponseWriter, r *http.Request) {
+	id, action, err := pathIDAction(r.URL.Path, "/api/media-files/")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	switch action {
+	case "retry":
+		s.handleRetryMediaFile(w, r, id)
+	default:
+		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported media file action %q", action))
+	}
+}
+
+func (s *Server) handleRetryMediaFile(w http.ResponseWriter, r *http.Request, id string) {
+	file, ok, err := s.mediaFiles.GetFile(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("media file not found"))
+		return
+	}
+	if file.Status != media.FileStatusFailed {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("media file is not failed"))
+		return
+	}
+	library, ok, err := s.libraries.Get(r.Context(), file.LibraryID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("library not found"))
+		return
+	}
+	info, err := os.Stat(file.Path)
+	if err != nil {
+		taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "retry failed media file: "+file.FileName)
+		taskRecord, _ = s.tasks.Start(taskRecord.ID)
+		_ = s.recordScanImportFailure(r.Context(), parsedFileFromMediaFile(file), err)
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"task":   taskRecord,
+			"failed": []scanImportFailure{{Path: file.Path, Error: err.Error()}},
+		})
+		return
+	}
+	parsed := scanner.ParseFile(file.Path)
+	parsed.LibraryID = library.ID
+	parsed.LibraryName = library.Name
+	parsed.MediaType = firstNonEmpty(file.DetectedMediaType, string(library.MediaType))
+	parsed.Size = info.Size()
+	parsed.ModifiedAt = info.ModTime()
+
+	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "retry failed media file: "+file.FileName)
+	taskRecord, _ = s.tasks.Start(taskRecord.ID)
+	imported, failures, err := s.importFilesIndividually(r.Context(), []scanner.ParsedFile{parsed})
+	if err != nil {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(failures) > 0 {
+		taskRecord, _ = s.tasks.Fail(taskRecord.ID, fmt.Errorf("%s", failures[0].Error))
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"task":   taskRecord,
+			"failed": failures,
+		})
+		return
+	}
+	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, "retried failed media file: "+file.FileName)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task":     taskRecord,
+		"imported": imported,
+		"count":    len(imported),
+	})
+}
+
+func parsedFileFromMediaFile(file media.File) scanner.ParsedFile {
+	return scanner.ParsedFile{
+		LibraryID:  file.LibraryID,
+		MediaType:  file.DetectedMediaType,
+		Path:       file.Path,
+		FileName:   file.FileName,
+		Extension:  file.Extension,
+		Size:       file.Size,
+		ModifiedAt: file.ModifiedAt,
+		Title:      file.ParsedTitle,
+		Year:       file.ParsedYear,
+		Season:     file.ParsedSeason,
+		Episode:    file.ParsedEpisode,
+		Number:     file.ParsedNumber,
+	}
 }
 
 func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {

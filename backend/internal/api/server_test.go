@@ -1252,6 +1252,59 @@ func TestRollbackOrganizerPlanCanRecoverFailedRollback(t *testing.T) {
 	}
 }
 
+func TestSkipOrganizerPlanFailedActions(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	source := filepath.Join(root, "downloads", "Missing.mkv")
+	targetRoot := filepath.Join(root, "library")
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Missing","year":2026},
+		"versions":[{"id":"v1","resolution":"1080p","source":"web-dl"}],
+		"files":[{"id":"f1","media_id":"m1","version_id":"v1","path":"`+source+`"}],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","enabled":true}
+	}`)
+	planID := plan["id"].(string)
+
+	executeResponse := httptest.NewRecorder()
+	executeRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/execute", nil)
+	server.ServeHTTP(executeResponse, executeRequest)
+	if executeResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 failed execute, got %d body=%s", executeResponse.Code, executeResponse.Body.String())
+	}
+	var executeBody map[string]any
+	if err := json.NewDecoder(executeResponse.Body).Decode(&executeBody); err != nil {
+		t.Fatal(err)
+	}
+	failedPlan := executeBody["plan"].(map[string]any)
+	if failedPlan["status"] != "failed" {
+		t.Fatalf("expected failed plan, got %#v", failedPlan)
+	}
+
+	skipResponse := httptest.NewRecorder()
+	skipRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/skip-failed?action_id=action-1&error_contains="+url.QueryEscape("no such file"), nil)
+	server.ServeHTTP(skipResponse, skipRequest)
+	if skipResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 skip failed action, got %d body=%s", skipResponse.Code, skipResponse.Body.String())
+	}
+	var skipBody map[string]any
+	if err := json.NewDecoder(skipResponse.Body).Decode(&skipBody); err != nil {
+		t.Fatal(err)
+	}
+	if skipBody["changed"].(float64) != 1 {
+		t.Fatalf("expected one skipped failed action, got %#v", skipBody)
+	}
+	repairedPlan := skipBody["plan"].(map[string]any)
+	if repairedPlan["status"] != "succeeded" {
+		t.Fatalf("expected repaired plan to be succeeded, got %#v", repairedPlan)
+	}
+	actions := repairedPlan["actions"].([]any)
+	action := actions[0].(map[string]any)
+	if action["status"] != "skipped" {
+		t.Fatalf("expected failed action skipped, got %#v", action)
+	}
+}
+
 func TestOrganizerRulesAndPlanByRuleID(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

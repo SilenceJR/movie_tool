@@ -3066,6 +3066,8 @@ func (s *Server) handleOrganizerPlanAction(w http.ResponseWriter, r *http.Reques
 		s.handleRenameOrganizerPlanConflicts(w, r, id)
 	case "confirm-overwrite-conflicts":
 		s.handleConfirmOrganizerPlanOverwriteConflicts(w, r, id)
+	case "skip-failed":
+		s.handleSkipOrganizerPlanFailedActions(w, r, id)
 	case "cancel":
 		s.handleCancelOrganizerPlan(w, r, id)
 	default:
@@ -3248,12 +3250,54 @@ func (s *Server) handleConfirmOrganizerPlanOverwriteConflicts(w http.ResponseWri
 	})
 }
 
+func (s *Server) handleSkipOrganizerPlanFailedActions(w http.ResponseWriter, r *http.Request, id string) {
+	plan, ok, err := s.organizer.GetPlan(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	if plan.Status != organizer.PlanFailed {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan failed actions cannot be skipped from status %q", plan.Status))
+		return
+	}
+	filter := parseOrganizerFailureFilter(r)
+	updated, changed := organizer.SkipFailedActions(plan, time.Now().UTC(), filter)
+	if changed == 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no failed actions to skip"))
+		return
+	}
+	saved, err := s.organizer.UpdatePlan(r.Context(), updated)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plan":    saved,
+		"changed": changed,
+	})
+}
+
 func parseOrganizerConflictFilter(r *http.Request) organizer.ConflictFilter {
 	query := r.URL.Query()
 	return organizer.ConflictFilter{
 		ActionIDs:        splitQueryValues(query["action_id"]),
 		ActionType:       organizer.ActionMode(strings.TrimSpace(query.Get("action_type"))),
 		ConflictReason:   strings.TrimSpace(query.Get("conflict_reason")),
+		SourcePathPrefix: strings.TrimSpace(query.Get("source_path_prefix")),
+		TargetPathPrefix: strings.TrimSpace(query.Get("target_path_prefix")),
+	}
+}
+
+func parseOrganizerFailureFilter(r *http.Request) organizer.FailureFilter {
+	query := r.URL.Query()
+	return organizer.FailureFilter{
+		ActionIDs:        splitQueryValues(query["action_id"]),
+		ActionType:       organizer.ActionMode(strings.TrimSpace(query.Get("action_type"))),
+		ErrorContains:    strings.TrimSpace(query.Get("error_contains")),
 		SourcePathPrefix: strings.TrimSpace(query.Get("source_path_prefix")),
 		TargetPathPrefix: strings.TrimSpace(query.Get("target_path_prefix")),
 	}

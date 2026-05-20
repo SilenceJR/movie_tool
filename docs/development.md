@@ -86,6 +86,7 @@ backend/internal/task         任务系统
 - 冲突计划可通过 `POST /api/organizer/plans/{id}/skip-conflicts` 批量把 conflict 动作转为 skipped，也可通过 `POST /api/organizer/plans/{id}/rename-conflicts` 批量重命名目标并转回 pending；磁盘目标已存在的 overwrite conflict 可通过 `POST /api/organizer/plans/{id}/confirm-overwrite-conflicts` 批量确认，执行时会先删除既有目标再执行 move/copy/hardlink/symlink。三个冲突处理 API 均支持 `action_id`、`action_type`、`conflict_reason`、`source_path_prefix`、`target_path_prefix` 筛选，便于局部处理批量计划。
 - `GET /api/organizer/conflicts/preview` 可使用同一组筛选参数预览 skip/rename/confirm-overwrite 会命中的冲突动作和数量，不修改计划状态，便于前端确认影响范围。
 - 失败计划可通过 `POST /api/organizer/plans/{id}/retry` 重试失败动作；如果失败发生在媒体文件路径回写阶段，会只重试数据库路径回写，避免重复移动/复制已完成的文件操作。
+- 失败计划也可通过 `POST /api/organizer/plans/{id}/skip-failed` 按 `action_id`、`action_type`、`error_contains`、`source_path_prefix`、`target_path_prefix` 将已人工处理或无需继续重试的 failed 动作标记为 skipped，并重新计算计划状态。
 - 已成功执行的整理计划可通过 `POST /api/organizer/plans/{id}/rollback` 回滚；move 会把目标移回源路径，copy/hardlink/symlink 会删除目标，并同步恢复关联 `media_files` 路径；如果回滚中途失败，修复文件系统问题后可再次调用 rollback 继续恢复失败动作。
 - 仍需补齐更细的批量计划过滤条件。
 
@@ -112,7 +113,7 @@ backend/internal/task         任务系统
 
 ```text
 1. 为下载目录监听增加失败重试和批量合并。
-2. 为 organizer 执行结果增加更细的失败恢复。
+2. 为 organizer 执行结果增加失败动作预览与批量修复确认。
 3. 为下载目录监听接入真实文件系统事件源。
-4. 为 organizer 执行结果增加更细的人工修复入口。
+4. 为下载目录监听失败重试增加目录级筛选。
 ```

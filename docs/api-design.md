@@ -195,6 +195,7 @@ POST /api/organizer/plan
 GET /api/organizer/plans/{id}
 POST /api/organizer/plans/{id}/execute
 POST /api/organizer/plans/{id}/cancel
+POST /api/organizer/plans/{id}/skip-failed?action_id={actionId}&action_type={mode}&error_contains={text}&source_path_prefix={path}&target_path_prefix={path}
 GET /api/organizer/actions
 ```
 

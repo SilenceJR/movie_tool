@@ -2286,6 +2286,9 @@ func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T)
 	if !logMessagesContain(logs, "watch directory Watched succeeded: discovered 1, imported 1, failed files 0") {
 		t.Fatalf("expected directory success summary log, got %#v", logs)
 	}
+	if !logMessagesContain(logs, `"download_directory_id":"`+watchedDir["id"].(string)+`"`) {
+		t.Fatalf("expected structured watch summary log, got %#v", logs)
+	}
 }
 
 func TestRunDownloadDirectoryWatchReportsDirectoryFailures(t *testing.T) {
@@ -2336,6 +2339,9 @@ func TestRunDownloadDirectoryWatchReportsDirectoryFailures(t *testing.T) {
 	}
 	if !logMessagesContain(logs, "failed to scan Missing download:") {
 		t.Fatalf("expected directory failure summary log, got %#v", logs)
+	}
+	if !logMessagesContain(logs, `"status":"failed"`) {
+		t.Fatalf("expected structured failed watch summary log, got %#v", logs)
 	}
 }
 

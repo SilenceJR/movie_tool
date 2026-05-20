@@ -1042,6 +1042,7 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 		})
 	}
 	if taskRecord != nil {
+		s.logDownloadWatchSummary(taskRecord.ID, summary)
 		message := fmt.Sprintf("download watch scanned %d directories, imported %d files, failed directories %d, failed files %d", len(results), totalImported, len(failures), totalFailedFiles)
 		completed, _ := s.tasks.Succeed(taskRecord.ID, message)
 		taskRecord = &completed
@@ -1109,6 +1110,17 @@ type downloadDirectoryWatchSummary struct {
 	FailedFileCount       int    `json:"failed_file_count"`
 	BatchCount            int    `json:"batch_count"`
 	OrganizerPlanID       string `json:"organizer_plan_id,omitempty"`
+}
+
+func (s *Server) logDownloadWatchSummary(taskID string, summary []downloadDirectoryWatchSummary) {
+	for _, item := range summary {
+		payload, err := json.Marshal(item)
+		if err != nil {
+			s.tasks.Log(taskID, task.LogLevelWarn, "failed to encode watch summary for "+item.DownloadDirectoryName+": "+err.Error())
+			continue
+		}
+		s.tasks.Log(taskID, task.LogLevelInfo, "watch summary: "+string(payload))
+	}
 }
 
 type downloadDirectoryScanResult struct {

@@ -55,7 +55,7 @@ backend/internal/task         任务系统
 - 已有 `/api/libraries/{id}/scan` 扫描入口，会递归发现媒体文件，创建或复用 media item/version，写入 `media_files`，并标记缺失文件。
 - 已有 `/api/download-directories` CRUD、`/api/download-directories/{id}/scan` 和 `/api/download-directories/watch/run`；下载目录可绑定目标媒体库和默认整理规则，扫描完成目录文件并作为待整理来源入库，且可用 `min_stable_seconds` 跳过仍在写入的近期文件；扫描时传入 `organizer_rule_id` 可覆盖目录默认规则，并同步生成限定该下载目录来源的整理 dry-run。
 - 下载目录监听运行入口会只处理同时 `enabled` 和 `watch_enabled` 的目录，并复用单目录扫描、批量入库、失败隔离与可选整理计划生成逻辑；生产入口已启动后台轮询器，轮询间隔与稳定时间可通过环境变量配置，默认每 5 分钟触发一次，且跳过 2 分钟内仍在变化的文件。
-- 每次下载目录监听批次会生成 `download_watch` 父任务，记录扫描目录数量、目录级成功/失败摘要与失败原因；具体目录扫描仍保留各自的 `library_scan` 子任务记录。
+- 每次下载目录监听批次会生成 `download_watch` 父任务，记录扫描目录数量、目录级成功/失败摘要与失败原因；目录级摘要会以 `watch summary: {...}` 结构化 JSON 日志写入父任务，具体目录扫描仍保留各自的 `library_scan` 子任务记录。
 - `GET /api/download-directories/watch/runs` 可查询 `download_watch` 历史任务，支持 `status` 与 `limit`，任务日志可用于追溯目录级摘要。
 - 下载目录监听响应已包含批次级 `summary`、总目录数、发现/入库/失败文件数、整理计划数、开始/完成时间与耗时；每个目录会给出 succeeded/failed、子任务、导入数量、失败数量和整理计划 ID，便于前端任务中心与自动化观测。
 - 下载目录监听批次已增加进程内去重保护；如果上一轮仍在运行，新的手动或后台触发会返回 skipped 状态，避免重复扫描与重复生成整理计划。手动触发可传 `debounce_seconds`，在上次完成时间仍位于去抖窗口内时直接返回 skipped，便于接入文件系统事件后抑制短时间重复扫描；也可传一个或多个 `directory_id` 只重跑指定监听目录，用于目录级失败重试；如果指定目录不存在或未启用监听，会返回 skipped，避免空批次被误判为成功重跑。
@@ -116,5 +116,5 @@ backend/internal/task         任务系统
 1. 为下载目录监听增加失败重试和批量合并。
 2. 为 organizer 执行结果增加更多失败动作修复方式。
 3. 为下载目录监听接入真实文件系统事件源。
-4. 为下载目录监听历史增加结构化目录摘要存储。
+4. 为下载目录监听历史接口直接返回结构化目录摘要。
 ```

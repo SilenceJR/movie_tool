@@ -3111,21 +3111,23 @@ func (s *Server) rollbackOrganizerPlan(ctx context.Context, plan organizer.Plan)
 			return taskRecord, organizer.Plan{}, rolledBack, err
 		}
 		action := plan.Actions[index]
-		if action.Status != organizer.ActionSucceeded {
+		if !isRollbackCandidate(action) {
 			continue
 		}
-		if err := rollbackOrganizerAction(action); err != nil {
-			plan.Actions[index].Status = organizer.ActionFailed
-			plan.Actions[index].Error = "rollback: " + err.Error()
-			plan.Status = organizer.PlanFailed
-			plan.UpdatedAt = now
-			saved, updateErr := s.organizer.UpdatePlan(ctx, plan)
-			if updateErr != nil {
-				taskRecord, _ = s.tasks.Fail(taskRecord.ID, updateErr)
-				return taskRecord, organizer.Plan{}, rolledBack, updateErr
+		if !isRollbackPathUpdateFailure(action) {
+			if err := rollbackOrganizerAction(action); err != nil {
+				plan.Actions[index].Status = organizer.ActionFailed
+				plan.Actions[index].Error = "rollback: " + err.Error()
+				plan.Status = organizer.PlanFailed
+				plan.UpdatedAt = now
+				saved, updateErr := s.organizer.UpdatePlan(ctx, plan)
+				if updateErr != nil {
+					taskRecord, _ = s.tasks.Fail(taskRecord.ID, updateErr)
+					return taskRecord, organizer.Plan{}, rolledBack, updateErr
+				}
+				taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+				return taskRecord, saved, rolledBack, nil
 			}
-			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-			return taskRecord, saved, rolledBack, nil
 		}
 		if action.MediaFileID != "" {
 			if _, ok, err := s.mediaFiles.UpdateFilePath(ctx, action.MediaFileID, action.SourcePath); err != nil {
@@ -3165,6 +3167,20 @@ func (s *Server) rollbackOrganizerPlan(ctx context.Context, plan organizer.Plan)
 	}
 	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, "rollback organizer plan: "+plan.ID)
 	return taskRecord, saved, rolledBack, nil
+}
+
+func isRollbackCandidate(action organizer.Action) bool {
+	if action.Status == organizer.ActionSucceeded {
+		return true
+	}
+	if action.Status != organizer.ActionFailed {
+		return false
+	}
+	return strings.HasPrefix(action.Error, "rollback: ") || isRollbackPathUpdateFailure(action)
+}
+
+func isRollbackPathUpdateFailure(action organizer.Action) bool {
+	return action.Status == organizer.ActionFailed && strings.HasPrefix(action.Error, "rollback media file path: ")
 }
 
 func rollbackOrganizerAction(action organizer.Action) error {

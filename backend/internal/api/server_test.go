@@ -1011,6 +1011,75 @@ func TestRollbackOrganizerPlan(t *testing.T) {
 	}
 }
 
+func TestRollbackOrganizerPlanCanRecoverFailedRollback(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	source := filepath.Join(root, "downloads", "Dune.mkv")
+	targetRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Dune","year":2021},
+		"versions":[{"id":"v1","resolution":"1080p","source":"web-dl"}],
+		"files":[{"id":"f1","media_id":"m1","version_id":"v1","path":"`+source+`"}],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","enabled":true}
+	}`)
+	planID := plan["id"].(string)
+	executeResponse := httptest.NewRecorder()
+	executeRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/execute", nil)
+	server.ServeHTTP(executeResponse, executeRequest)
+	if executeResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 execute, got %d body=%s", executeResponse.Code, executeResponse.Body.String())
+	}
+	target := filepath.Join(targetRoot, "Dune (2021)", "Dune - 1080p.mkv")
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+
+	firstRollbackResponse := httptest.NewRecorder()
+	firstRollbackRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/rollback", nil)
+	server.ServeHTTP(firstRollbackResponse, firstRollbackRequest)
+	if firstRollbackResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 failed rollback, got %d body=%s", firstRollbackResponse.Code, firstRollbackResponse.Body.String())
+	}
+	var firstBody map[string]any
+	if err := json.NewDecoder(firstRollbackResponse.Body).Decode(&firstBody); err != nil {
+		t.Fatal(err)
+	}
+	firstPlan := firstBody["plan"].(map[string]any)
+	firstAction := firstPlan["actions"].([]any)[0].(map[string]any)
+	if firstPlan["status"] != "failed" || firstAction["status"] != "failed" {
+		t.Fatalf("expected rollback failure to persist failed action, got %#v", firstPlan)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	secondRollbackResponse := httptest.NewRecorder()
+	secondRollbackRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+planID+"/rollback", nil)
+	server.ServeHTTP(secondRollbackResponse, secondRollbackRequest)
+	if secondRollbackResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 retry rollback, got %d body=%s", secondRollbackResponse.Code, secondRollbackResponse.Body.String())
+	}
+	var secondBody map[string]any
+	if err := json.NewDecoder(secondRollbackResponse.Body).Decode(&secondBody); err != nil {
+		t.Fatal(err)
+	}
+	secondPlan := secondBody["plan"].(map[string]any)
+	secondAction := secondPlan["actions"].([]any)[0].(map[string]any)
+	if secondPlan["status"] != "canceled" || secondAction["status"] != "rolled_back" {
+		t.Fatalf("expected retry rollback to succeed, got %#v", secondPlan)
+	}
+}
+
 func TestOrganizerRulesAndPlanByRuleID(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

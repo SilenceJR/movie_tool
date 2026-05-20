@@ -1392,6 +1392,53 @@ func TestRetryFailedMediaFilesByLibrary(t *testing.T) {
 	}
 }
 
+func TestRetryFailedMediaFilesHonorsLimit(t *testing.T) {
+	root := t.TempDir()
+	firstPath := filepath.Join(root, "Arrival.2016.mkv")
+	secondPath := filepath.Join(root, "Dune.2021.mkv")
+	if err := os.WriteFile(firstPath, []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+	libraryID := library["id"].(string)
+	for _, path := range []string{firstPath, secondPath} {
+		if _, err := server.mediaFiles.MarkFileFailed(context.Background(), media.FailedFileInput{
+			LibraryID: libraryID,
+			Path:      path,
+			Error:     "previous import failed",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/media-files/retry-failed?library_id="+libraryID+"&limit=1", nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 limited retry failed files, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["retry_count"] != float64(1) || body["failed_total"] != float64(2) || body["remaining"] != float64(1) || body["limit_applied"] != true {
+		t.Fatalf("expected limit metadata, got %#v", body)
+	}
+	failedFiles, err := server.mediaFiles.ListFiles(context.Background(), media.FileQuery{LibraryID: libraryID, Status: media.FileStatusFailed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failedFiles) != 1 {
+		t.Fatalf("expected one failed file to remain after limited retry, got %#v", failedFiles)
+	}
+}
+
 func TestScanLibraryMarksMissingFiles(t *testing.T) {
 	root := t.TempDir()
 	keepPath := filepath.Join(root, "Keep.2020.mkv")

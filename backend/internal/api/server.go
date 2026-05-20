@@ -1513,6 +1513,15 @@ func (s *Server) handleRetryFailedMediaFiles(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, fmt.Errorf("library_id is required"))
 		return
 	}
+	limit, err := parseOptionalInt(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if limit < 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("limit cannot be negative"))
+		return
+	}
 	if _, ok, err := s.libraries.Get(r.Context(), libraryID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1524,6 +1533,10 @@ func (s *Server) handleRetryFailedMediaFiles(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	total := len(files)
+	if limit > 0 && limit < len(files) {
+		files = files[:limit]
 	}
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "retry failed media files")
 	taskRecord, _ = s.tasks.Start(taskRecord.ID)
@@ -1545,10 +1558,14 @@ func (s *Server) handleRetryFailedMediaFiles(w http.ResponseWriter, r *http.Requ
 	message := fmt.Sprintf("retried %d failed media files, succeeded %d, failed %d", len(files), len(imported), len(failures))
 	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, message)
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"task":     taskRecord,
-		"imported": imported,
-		"failed":   failures,
-		"count":    len(imported),
+		"task":          taskRecord,
+		"imported":      imported,
+		"failed":        failures,
+		"count":         len(imported),
+		"retry_count":   len(files),
+		"failed_total":  total,
+		"remaining":     total - len(files),
+		"limit_applied": limit > 0 && limit < total,
 	})
 }
 

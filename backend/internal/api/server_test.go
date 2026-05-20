@@ -15,6 +15,7 @@ import (
 
 	"movie-tool/backend/internal/catalog"
 	"movie-tool/backend/internal/config"
+	"movie-tool/backend/internal/media"
 	"movie-tool/backend/internal/scanner"
 	"movie-tool/backend/internal/task"
 )
@@ -1254,17 +1255,32 @@ func TestImportScannedFilesContinueOnError(t *testing.T) {
 			Title:     "Broken",
 			Year:      2020,
 		},
+		{
+			LibraryID: "library-1",
+			Path:      "/downloads/Unknown.2021.mkv",
+			FileName:  "Unknown.2021.mkv",
+			Extension: ".mkv",
+			Title:     "Unknown",
+			Year:      2021,
+		},
 	}
 
 	imported, missingCount, batches, failures, err := server.importScannedFiles(context.Background(), files, "", 2, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(imported) != 1 || missingCount != 0 || batches != 1 {
+	if len(imported) != 1 || missingCount != 0 || batches != 2 {
 		t.Fatalf("unexpected partial import result imported=%d missing=%d batches=%d", len(imported), missingCount, batches)
 	}
-	if len(failures) != 1 || failures[0].Path != "/downloads/Broken.2020.mkv" {
-		t.Fatalf("expected one failed file, got %+v", failures)
+	if len(failures) != 2 || failures[0].Path != "/downloads/Broken.2020.mkv" || failures[1].Path != "/downloads/Unknown.2021.mkv" {
+		t.Fatalf("expected two failed files, got %+v", failures)
+	}
+	failedFiles, err := server.mediaFiles.ListFiles(context.Background(), media.FileQuery{LibraryID: "library-1", Status: media.FileStatusFailed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failedFiles) != 1 || failedFiles[0].Path != "/downloads/Unknown.2021.mkv" || failedFiles[0].FailureError == "" {
+		t.Fatalf("expected failed file to be persisted, got %#v", failedFiles)
 	}
 }
 

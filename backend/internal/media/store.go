@@ -11,6 +11,7 @@ import (
 
 type Store interface {
 	UpsertFile(context.Context, FileInput) (File, error)
+	MarkFileFailed(context.Context, FailedFileInput) (File, error)
 	GetFile(context.Context, string) (File, bool, error)
 	UpdateFilePath(context.Context, string, string) (File, bool, error)
 	ListFilesByLibrary(context.Context, string) ([]File, error)
@@ -43,6 +44,22 @@ type FileInput struct {
 	ParsedNumber      string
 	IsSTRM            bool
 	STRMTarget        string
+}
+
+type FailedFileInput struct {
+	LibraryID         string
+	Path              string
+	FileName          string
+	Extension         string
+	Size              int64
+	ModifiedAt        time.Time
+	DetectedMediaType string
+	ParsedTitle       string
+	ParsedYear        int
+	ParsedSeason      int
+	ParsedEpisode     int
+	ParsedNumber      string
+	Error             string
 }
 
 type MemoryStore struct {
@@ -106,6 +123,53 @@ func (s *MemoryStore) UpsertFile(_ context.Context, input FileInput) (File, erro
 	file.ParsedSeason = input.ParsedSeason
 	file.ParsedEpisode = input.ParsedEpisode
 	file.ParsedNumber = input.ParsedNumber
+	file.FailureError = ""
+	file.FailedAt = nil
+	file.UpdatedAt = now
+
+	s.files[normalizedPath] = file
+	return file, nil
+}
+
+func (s *MemoryStore) MarkFileFailed(_ context.Context, input FailedFileInput) (File, error) {
+	if err := normalizeFailedFileInput(&input); err != nil {
+		return File{}, err
+	}
+
+	normalizedPath := normalizePath(input.Path)
+	now := s.now().UTC()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	file, exists := s.files[normalizedPath]
+	if !exists {
+		file = File{
+			ID:             fallbackID("file"),
+			NormalizedPath: normalizedPath,
+			CreatedAt:      now,
+		}
+	}
+
+	file.LibraryID = input.LibraryID
+	file.MediaID = ""
+	file.VersionID = ""
+	file.Path = input.Path
+	file.FileName = input.FileName
+	file.Extension = strings.ToLower(input.Extension)
+	file.Size = input.Size
+	file.ModifiedAt = input.ModifiedAt
+	file.Status = FileStatusFailed
+	file.IsSTRM = false
+	file.STRMTarget = ""
+	file.DetectedMediaType = input.DetectedMediaType
+	file.ParsedTitle = input.ParsedTitle
+	file.ParsedYear = input.ParsedYear
+	file.ParsedSeason = input.ParsedSeason
+	file.ParsedEpisode = input.ParsedEpisode
+	file.ParsedNumber = input.ParsedNumber
+	file.FailureError = input.Error
+	file.FailedAt = &now
 	file.UpdatedAt = now
 
 	s.files[normalizedPath] = file
@@ -168,6 +232,8 @@ func (s *MemoryStore) UpdateFilePath(_ context.Context, id string, path string) 
 		file.FileName = filepath.Base(path)
 		file.Extension = strings.ToLower(filepath.Ext(path))
 		file.Status = FileStatusAvailable
+		file.FailureError = ""
+		file.FailedAt = nil
 		file.UpdatedAt = now
 		s.files[file.NormalizedPath] = file
 		return file, true, nil
@@ -228,6 +294,28 @@ func (s *MemoryStore) DeleteMissingByLibrary(_ context.Context, libraryID string
 
 func normalizePath(path string) string {
 	return filepath.Clean(path)
+}
+
+func normalizeFailedFileInput(input *FailedFileInput) error {
+	input.Path = strings.TrimSpace(input.Path)
+	input.LibraryID = strings.TrimSpace(input.LibraryID)
+	input.Error = strings.TrimSpace(input.Error)
+	if input.LibraryID == "" {
+		return fmt.Errorf("library id is required")
+	}
+	if input.Path == "" {
+		return fmt.Errorf("file path is required")
+	}
+	if input.Error == "" {
+		input.Error = "scan import failed"
+	}
+	if input.FileName == "" {
+		input.FileName = filepath.Base(input.Path)
+	}
+	if input.Extension == "" {
+		input.Extension = strings.ToLower(filepath.Ext(input.Path))
+	}
+	return nil
 }
 
 func fallbackID(prefix string) string {

@@ -110,6 +110,46 @@ func TestMemoryStoreMarkMissingByLibrary(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreMarkFileFailedAndClearOnUpsert(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	store.now = func() time.Time {
+		return now
+	}
+
+	failed, err := store.MarkFileFailed(context.Background(), FailedFileInput{
+		LibraryID:         "library-1",
+		Path:              "/downloads/Broken.2020.mkv",
+		DetectedMediaType: "movie",
+		ParsedTitle:       "Broken",
+		ParsedYear:        2020,
+		Error:             "library id is required",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != FileStatusFailed || failed.FailureError == "" || failed.FailedAt == nil {
+		t.Fatalf("expected failed file with failure details, got %#v", failed)
+	}
+
+	recovered, err := store.UpsertFile(context.Background(), FileInput{
+		LibraryID:         "library-1",
+		Path:              "/downloads/Broken.2020.mkv",
+		DetectedMediaType: "movie",
+		ParsedTitle:       "Broken",
+		ParsedYear:        2020,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.ID != failed.ID {
+		t.Fatalf("expected recovered file to keep id %q, got %q", failed.ID, recovered.ID)
+	}
+	if recovered.Status != FileStatusAvailable || recovered.FailureError != "" || recovered.FailedAt != nil {
+		t.Fatalf("expected successful upsert to clear failure details, got %#v", recovered)
+	}
+}
+
 func TestMemoryStoreUpdateFilePath(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)

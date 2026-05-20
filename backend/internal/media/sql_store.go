@@ -64,6 +64,8 @@ func (s *SQLStore) UpsertFile(ctx context.Context, input FileInput) (File, error
 	file.ParsedSeason = input.ParsedSeason
 	file.ParsedEpisode = input.ParsedEpisode
 	file.ParsedNumber = input.ParsedNumber
+	file.FailureError = ""
+	file.FailedAt = nil
 	file.UpdatedAt = now
 
 	if ok {
@@ -71,7 +73,7 @@ func (s *SQLStore) UpsertFile(ctx context.Context, input FileInput) (File, error
 UPDATE media_files
 SET media_id = ?, version_id = ?, library_id = ?, path = ?, file_name = ?, extension = ?, size = ?, modified_at = ?, file_status = ?,
     is_strm = ?, strm_target = ?, detected_media_type = ?, parsed_title = ?, parsed_year = ?,
-    parsed_season = ?, parsed_episode = ?, parsed_number = ?, updated_at = ?
+    parsed_season = ?, parsed_episode = ?, parsed_number = ?, failure_error = ?, failed_at = ?, updated_at = ?
 WHERE normalized_path = ?`,
 			nullableString(file.MediaID),
 			nullableString(file.VersionID),
@@ -90,6 +92,8 @@ WHERE normalized_path = ?`,
 			file.ParsedSeason,
 			file.ParsedEpisode,
 			file.ParsedNumber,
+			nullableString(file.FailureError),
+			nullableTime(file.FailedAt),
 			formatTime(file.UpdatedAt),
 			file.NormalizedPath,
 		)
@@ -98,8 +102,8 @@ WHERE normalized_path = ?`,
 INSERT INTO media_files (
   id, media_id, version_id, library_id, path, normalized_path, file_name, extension, size, modified_at, file_status,
   is_strm, strm_target, detected_media_type, parsed_title, parsed_year, parsed_season,
-  parsed_episode, parsed_number, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  parsed_episode, parsed_number, failure_error, failed_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			file.ID,
 			nullableString(file.MediaID),
 			nullableString(file.VersionID),
@@ -119,6 +123,109 @@ INSERT INTO media_files (
 			file.ParsedSeason,
 			file.ParsedEpisode,
 			file.ParsedNumber,
+			nullableString(file.FailureError),
+			nullableTime(file.FailedAt),
+			formatTime(file.CreatedAt),
+			formatTime(file.UpdatedAt),
+		)
+	}
+	if err != nil {
+		return File{}, err
+	}
+	return file, nil
+}
+
+func (s *SQLStore) MarkFileFailed(ctx context.Context, input FailedFileInput) (File, error) {
+	if err := normalizeFailedFileInput(&input); err != nil {
+		return File{}, err
+	}
+
+	normalizedPath := normalizePath(input.Path)
+	existing, ok, err := s.GetFileByPath(ctx, normalizedPath)
+	if err != nil {
+		return File{}, err
+	}
+
+	now := s.now().UTC()
+	file := existing
+	if !ok {
+		file = File{
+			ID:             newID("file"),
+			NormalizedPath: normalizedPath,
+			CreatedAt:      now,
+		}
+	}
+
+	file.LibraryID = input.LibraryID
+	file.MediaID = ""
+	file.VersionID = ""
+	file.Path = input.Path
+	file.FileName = input.FileName
+	file.Extension = strings.ToLower(input.Extension)
+	file.Size = input.Size
+	file.ModifiedAt = input.ModifiedAt
+	file.Status = FileStatusFailed
+	file.IsSTRM = false
+	file.STRMTarget = ""
+	file.DetectedMediaType = input.DetectedMediaType
+	file.ParsedTitle = input.ParsedTitle
+	file.ParsedYear = input.ParsedYear
+	file.ParsedSeason = input.ParsedSeason
+	file.ParsedEpisode = input.ParsedEpisode
+	file.ParsedNumber = input.ParsedNumber
+	file.FailureError = input.Error
+	file.FailedAt = &now
+	file.UpdatedAt = now
+
+	if ok {
+		_, err = s.db.ExecContext(ctx, `
+UPDATE media_files
+SET media_id = NULL, version_id = NULL, library_id = ?, path = ?, file_name = ?, extension = ?, size = ?, modified_at = ?, file_status = ?,
+    is_strm = 0, strm_target = NULL, detected_media_type = ?, parsed_title = ?, parsed_year = ?,
+    parsed_season = ?, parsed_episode = ?, parsed_number = ?, failure_error = ?, failed_at = ?, updated_at = ?
+WHERE normalized_path = ?`,
+			file.LibraryID,
+			file.Path,
+			file.FileName,
+			file.Extension,
+			file.Size,
+			formatTime(file.ModifiedAt),
+			string(file.Status),
+			file.DetectedMediaType,
+			file.ParsedTitle,
+			file.ParsedYear,
+			file.ParsedSeason,
+			file.ParsedEpisode,
+			file.ParsedNumber,
+			file.FailureError,
+			formatTime(*file.FailedAt),
+			formatTime(file.UpdatedAt),
+			file.NormalizedPath,
+		)
+	} else {
+		_, err = s.db.ExecContext(ctx, `
+INSERT INTO media_files (
+  id, media_id, version_id, library_id, path, normalized_path, file_name, extension, size, modified_at, file_status,
+  is_strm, strm_target, detected_media_type, parsed_title, parsed_year, parsed_season,
+  parsed_episode, parsed_number, failure_error, failed_at, created_at, updated_at
+) VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			file.ID,
+			file.LibraryID,
+			file.Path,
+			file.NormalizedPath,
+			file.FileName,
+			file.Extension,
+			file.Size,
+			formatTime(file.ModifiedAt),
+			string(file.Status),
+			file.DetectedMediaType,
+			file.ParsedTitle,
+			file.ParsedYear,
+			file.ParsedSeason,
+			file.ParsedEpisode,
+			file.ParsedNumber,
+			file.FailureError,
+			formatTime(*file.FailedAt),
 			formatTime(file.CreatedAt),
 			formatTime(file.UpdatedAt),
 		)
@@ -137,7 +244,7 @@ func (s *SQLStore) GetFile(ctx context.Context, id string) (File, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, media_id, version_id, library_id, path, normalized_path, file_name, extension, size, modified_at,
        file_status, is_strm, strm_target, detected_media_type, parsed_title, parsed_year,
-       parsed_season, parsed_episode, parsed_number, created_at, updated_at
+       parsed_season, parsed_episode, parsed_number, failure_error, failed_at, created_at, updated_at
 FROM media_files
 WHERE id = ?`, id)
 
@@ -166,11 +273,13 @@ func (s *SQLStore) UpdateFilePath(ctx context.Context, id string, path string) (
 	file.FileName = filepath.Base(path)
 	file.Extension = strings.ToLower(filepath.Ext(path))
 	file.Status = FileStatusAvailable
+	file.FailureError = ""
+	file.FailedAt = nil
 	file.UpdatedAt = now
 
 	_, err = s.db.ExecContext(ctx, `
 UPDATE media_files
-SET path = ?, normalized_path = ?, file_name = ?, extension = ?, file_status = ?, updated_at = ?
+SET path = ?, normalized_path = ?, file_name = ?, extension = ?, file_status = ?, failure_error = NULL, failed_at = NULL, updated_at = ?
 WHERE id = ?`,
 		file.Path,
 		file.NormalizedPath,
@@ -205,7 +314,7 @@ func (s *SQLStore) ListFiles(ctx context.Context, query FileQuery) ([]File, erro
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, media_id, version_id, library_id, path, normalized_path, file_name, extension, size, modified_at,
        file_status, is_strm, strm_target, detected_media_type, parsed_title, parsed_year,
-       parsed_season, parsed_episode, parsed_number, created_at, updated_at
+       parsed_season, parsed_episode, parsed_number, failure_error, failed_at, created_at, updated_at
 FROM media_files
 `+where+`
 ORDER BY path ASC`, args...)
@@ -232,7 +341,7 @@ func (s *SQLStore) GetFileByPath(ctx context.Context, path string) (File, bool, 
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, media_id, version_id, library_id, path, normalized_path, file_name, extension, size, modified_at,
        file_status, is_strm, strm_target, detected_media_type, parsed_title, parsed_year,
-       parsed_season, parsed_episode, parsed_number, created_at, updated_at
+       parsed_season, parsed_episode, parsed_number, failure_error, failed_at, created_at, updated_at
 FROM media_files
 WHERE normalized_path = ?`, normalizePath(path))
 
@@ -313,6 +422,8 @@ func scanFile(scanner fileScanner) (File, error) {
 	var status string
 	var isSTRM int
 	var strmTarget sql.NullString
+	var failureError sql.NullString
+	var failedAt sql.NullString
 
 	err := scanner.Scan(
 		&file.ID,
@@ -334,6 +445,8 @@ func scanFile(scanner fileScanner) (File, error) {
 		&file.ParsedSeason,
 		&file.ParsedEpisode,
 		&file.ParsedNumber,
+		&failureError,
+		&failedAt,
 		&createdAt,
 		&updatedAt,
 	)
@@ -346,6 +459,11 @@ func scanFile(scanner fileScanner) (File, error) {
 	file.Status = FileStatus(status)
 	file.IsSTRM = isSTRM == 1
 	file.STRMTarget = strmTarget.String
+	file.FailureError = failureError.String
+	if failedAt.Valid && failedAt.String != "" {
+		parsed := parseTime(failedAt.String)
+		file.FailedAt = &parsed
+	}
 	file.ModifiedAt = parseTime(modifiedAt)
 	file.CreatedAt = parseTime(createdAt)
 	file.UpdatedAt = parseTime(updatedAt)
@@ -390,6 +508,13 @@ func nullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func nullableTime(value *time.Time) any {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+	return formatTime(*value)
 }
 
 func formatTime(value time.Time) string {

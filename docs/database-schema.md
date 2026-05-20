@@ -135,6 +135,8 @@ CREATE TABLE media_files (
   parsed_season INTEGER,
   parsed_episode INTEGER,
   parsed_number TEXT,
+  failure_error TEXT,
+  failed_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (library_id) REFERENCES libraries(id),

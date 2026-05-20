@@ -1171,12 +1171,38 @@ func (s *Server) importFilesIndividually(ctx context.Context, files []scanner.Pa
 	for _, file := range files {
 		fileImported, _, err := s.importScannedFilesSingleBatch(ctx, []scanner.ParsedFile{file}, "")
 		if err != nil {
-			failures = append(failures, scanImportFailure{Path: file.Path, Error: err.Error()})
+			failure := scanImportFailure{Path: file.Path, Error: err.Error()}
+			if recordErr := s.recordScanImportFailure(ctx, file, err); recordErr != nil {
+				failure.Error = failure.Error + "; failed to record failure: " + recordErr.Error()
+			}
+			failures = append(failures, failure)
 			continue
 		}
 		imported = append(imported, fileImported...)
 	}
 	return imported, failures, nil
+}
+
+func (s *Server) recordScanImportFailure(ctx context.Context, file scanner.ParsedFile, cause error) error {
+	if file.LibraryID == "" || file.Path == "" {
+		return nil
+	}
+	_, err := s.mediaFiles.MarkFileFailed(ctx, media.FailedFileInput{
+		LibraryID:         file.LibraryID,
+		Path:              file.Path,
+		FileName:          file.FileName,
+		Extension:         file.Extension,
+		Size:              file.Size,
+		ModifiedAt:        file.ModifiedAt,
+		DetectedMediaType: file.MediaType,
+		ParsedTitle:       file.Title,
+		ParsedYear:        file.Year,
+		ParsedSeason:      file.Season,
+		ParsedEpisode:     file.Episode,
+		ParsedNumber:      file.Number,
+		Error:             cause.Error(),
+	})
+	return err
 }
 
 func (s *Server) importScannedFilesSingleBatch(ctx context.Context, files []scanner.ParsedFile, markMissingLibraryID string) ([]media.File, int, error) {

@@ -82,6 +82,8 @@ type File struct {
 	ParsedSeason      int        `json:"parsed_season"`
 	ParsedEpisode     int        `json:"parsed_episode"`
 	ParsedNumber      string     `json:"parsed_number"`
+	FailureError      string     `json:"failure_error,omitempty"`
+	FailedAt          *time.Time `json:"failed_at,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }

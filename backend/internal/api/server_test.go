@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -123,6 +124,114 @@ func TestRAGConfig(t *testing.T) {
 	}
 	if body["has_api_key"] != true || body["api_key"] != nil {
 		t.Fatalf("expected API key to be redacted, got %#v", body)
+	}
+}
+
+func TestListScrapers(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0", TMDBAPIKey: "secret"})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 scrapers, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body []map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body) < 3 || body[0]["provider"] != "tmdb" || body[0]["configured"] != true {
+		t.Fatalf("expected configured tmdb plus planned providers, got %#v", body)
+	}
+}
+
+func TestSearchTMDBScraperDoesNotPersistCandidates(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/3/search/movie" {
+			t.Fatalf("unexpected tmdb path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("expected bearer auth, got %q", got)
+		}
+		if r.URL.Query().Get("query") != "Inception" || r.URL.Query().Get("year") != "2010" || r.URL.Query().Get("language") != "zh-CN" {
+			t.Fatalf("unexpected tmdb query %s", r.URL.RawQuery)
+		}
+		return jsonResponse(`{"results":[{"id":27205,"title":"Inception","original_title":"Inception","overview":"A mind-bending heist.","release_date":"2010-07-15","poster_path":"/poster.jpg"}]}`), nil
+	})}
+
+	server := NewServerWithDependencies(config.Config{Host: "127.0.0.1", Port: "0", TMDBBaseURL: "http://tmdb.test", TMDBAPIKey: "test-token"}, Dependencies{ScraperHTTP: client})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/tmdb/search?media_type=movie&title=Inception&year=2010&language=zh-CN", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 tmdb search, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["persisted"] != false || body["count"] != float64(1) {
+		t.Fatalf("expected one non-persisted candidate, got %#v", body)
+	}
+	candidates := body["candidates"].([]any)
+	candidate := candidates[0].(map[string]any)
+	if candidate["provider"] != "tmdb" || candidate["external_id"] != "27205" || candidate["year"] != float64(2010) {
+		t.Fatalf("unexpected candidate mapping: %#v", candidate)
+	}
+
+	listResponse := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/scrape-candidates?media_file_id=file-1", nil)
+	server.ServeHTTP(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("expected candidate list 200, got %d body=%s", listResponse.Code, listResponse.Body.String())
+	}
+	var stored []any
+	if err := json.NewDecoder(listResponse.Body).Decode(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("expected live scraper search to avoid persistence, got %#v", stored)
+	}
+}
+
+func TestFetchTMDBScraperMetadata(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/3/tv/1399" {
+			t.Fatalf("unexpected tmdb path %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("language") != "zh-CN" {
+			t.Fatalf("unexpected tmdb query %s", r.URL.RawQuery)
+		}
+		return jsonResponse(`{"id":1399,"name":"Game of Thrones","original_name":"Game of Thrones","overview":"Nine noble families fight for control.","first_air_date":"2011-04-17"}`), nil
+	})}
+
+	server := NewServerWithDependencies(config.Config{Host: "127.0.0.1", Port: "0", TMDBBaseURL: "http://tmdb.test", TMDBAPIKey: "test-token"}, Dependencies{ScraperHTTP: client})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/tmdb/fetch?media_type=tv&external_id=1399&language=zh-CN", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 tmdb fetch, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	metadata := body["metadata"].(map[string]any)
+	if metadata["provider"] != "tmdb" || metadata["external_id"] != "tv:1399" || metadata["year"] != float64(2011) {
+		t.Fatalf("unexpected metadata mapping: %#v", metadata)
+	}
+}
+
+func TestTMDBScraperRequiresAPIKey(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0", TMDBBaseURL: "http://example.test"})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/tmdb/search?media_type=movie&title=Inception", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when tmdb api key is missing, got %d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -3253,6 +3362,20 @@ func TestConfig(t *testing.T) {
 	}
 	if body["database"] != "./data/movie-tool.db" {
 		t.Fatalf("expected database config, got %q", body["database"])
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func jsonResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
 

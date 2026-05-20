@@ -11,26 +11,26 @@ type SearchQuery struct {
 }
 
 type Candidate struct {
-	Provider      string
-	ExternalID    string
-	Title         string
-	OriginalTitle string
-	Year          int
-	PosterURL     string
-	Overview      string
-	Score         int
-	ScoreReasons  []string
+	Provider      string   `json:"provider"`
+	ExternalID    string   `json:"external_id"`
+	Title         string   `json:"title"`
+	OriginalTitle string   `json:"original_title"`
+	Year          int      `json:"year"`
+	PosterURL     string   `json:"poster_url"`
+	Overview      string   `json:"overview"`
+	Score         int      `json:"score"`
+	ScoreReasons  []string `json:"score_reasons"`
 }
 
 type Metadata struct {
-	Provider      string
-	ExternalID    string
-	Title         string
-	OriginalTitle string
-	DisplayTitle  string
-	Language      string
-	Overview      string
-	Year          int
+	Provider      string `json:"provider"`
+	ExternalID    string `json:"external_id"`
+	Title         string `json:"title"`
+	OriginalTitle string `json:"original_title"`
+	DisplayTitle  string `json:"display_title"`
+	Language      string `json:"language"`
+	Overview      string `json:"overview"`
+	Year          int    `json:"year"`
 }
 
 type Scraper interface {

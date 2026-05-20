@@ -2,6 +2,18 @@
 
 ## 1. 刮削源
 
+当前优先级调整为：先做可验证的数据获取，再把稳定候选写入数据库。AV 资源为主线；普通电影/电视剧使用 TMDB 与豆瓣兜底。
+
+已落地的验证接口：
+
+```http
+GET /api/scrapers
+GET /api/scrapers/tmdb/search?media_type=movie&title=Inception&year=2010&language=zh-CN
+GET /api/scrapers/tmdb/fetch?media_type=movie&external_id=27205&language=zh-CN
+```
+
+`tmdb` 使用 `TMDB_API_KEY` 鉴权，`TMDB_BASE_URL` 默认 `https://api.themoviedb.org`。搜索/详情接口默认只验证远端可获取和字段映射，不直接写入 `scrape_candidates`，后续由显式“保存候选/选择候选”流程入库。
+
 ### 普通媒体
 
 - TMDB
@@ -25,6 +37,16 @@
 - AVSOX
 - Jav321
 - 本地番号规则
+
+AV provider 接入顺序：
+
+```text
+1. 番号解析与源路由：ABC-123、FC2-PPV-1234567、HEYZO-1234、CARIB-123456-789。
+2. live search/fetch 验证：先返回候选、封面、发行日期、片商、演员、标签、简介，不写库。
+3. 字段归一化：番号、原始标题、中文标题、发行日期、时长、演员、片商、系列、标签、封面。
+4. 候选评分：番号精确匹配优先，再参考标题、年份/发行日期、演员、片商。
+5. 显式入库：验证通过后写入 scrape_candidates，再进入人工选择或自动决策。
+```
 
 ## 2. 文件名解析
 
@@ -179,4 +201,3 @@ quality_score
 如果版本属性不同，创建新 media_version
 如果路径不同但版本属性相同，作为同版本文件或重复文件处理
 ```
-

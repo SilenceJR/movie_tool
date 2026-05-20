@@ -20,6 +20,8 @@ type Config struct {
 	RAGChatModel              string
 	RAGQdrantURL              string
 	RAGCollection             string
+	TMDBBaseURL               string
+	TMDBAPIKey                string
 }
 
 func Load() Config {
@@ -38,6 +40,8 @@ func Load() Config {
 		RAGChatModel:              env("RAG_CHAT_MODEL", "Qwen3.5-4B-MLX-4bit"),
 		RAGQdrantURL:              env("QDRANT_URL", "http://localhost:6333"),
 		RAGCollection:             env("RAG_COLLECTION", "local_files"),
+		TMDBBaseURL:               env("TMDB_BASE_URL", "https://api.themoviedb.org"),
+		TMDBAPIKey:                env("TMDB_API_KEY", ""),
 	}
 }
 

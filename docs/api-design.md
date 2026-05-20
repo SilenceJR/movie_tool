@@ -120,6 +120,23 @@ sort
 
 ## 6. 刮削候选
 
+先提供“验证源可获取数据”的 live scraper API，再把验证通过的候选显式写入 `scrape_candidates`。这样 AV 源、TMDB、豆瓣等 provider 接入时，可以先确认远端可搜索、可详情获取、字段映射稳定，再进入数据库和自动决策。
+
+```http
+GET /api/scrapers
+GET /api/scrapers/{provider}/search?media_type={movie|tv|av}&title={title}&year={year}&number={number}&language={language}
+GET /api/scrapers/{provider}/fetch?media_type={movie|tv|av}&external_id={externalId}&language={language}
+```
+
+当前已实现：
+
+- `tmdb`：电影/电视剧兜底源，配置 `TMDB_API_KEY` 与可选 `TMDB_BASE_URL` 后可用；`search` 与 `fetch` 默认只返回验证结果，不写入候选表。
+
+规划中：
+
+- `av`：AV 番号元数据主线，按 JavDB/JavBus/FC2/MGStage/R18/Jav321 等源逐个验证可用性。
+- `douban`：中文电影/电视剧补充兜底。
+
 ```http
 GET /api/media/{id}/scrape-candidates
 POST /api/media/{id}/scrape-candidates/search

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,7 @@ type Server struct {
 	strm                         strm.Store
 	tasks                        *task.Queue
 	scanDB                       transactionBeginner
+	scraperHTTPClient            *http.Client
 	downloadWatchMu              sync.Mutex
 	lastDownloadWatchCompletedAt time.Time
 }
@@ -64,6 +66,7 @@ type Dependencies struct {
 	STRM         strm.Store
 	Tasks        *task.Queue
 	ScanDB       transactionBeginner
+	ScraperHTTP  *http.Client
 }
 
 type transactionBeginner interface {
@@ -113,21 +116,22 @@ func NewServerWithDependencies(cfg config.Config, deps Dependencies) *Server {
 	}
 
 	server := &Server{
-		cfg:          cfg,
-		mux:          http.NewServeMux(),
-		ai:           deps.AI,
-		automations:  deps.Automations,
-		catalog:      deps.Catalog,
-		downloads:    deps.Downloads,
-		integrations: deps.Integrations,
-		libraries:    deps.Libraries,
-		localization: deps.Localization,
-		mediaFiles:   deps.MediaFiles,
-		organizer:    deps.Organizer,
-		scraper:      deps.Scraper,
-		strm:         deps.STRM,
-		tasks:        deps.Tasks,
-		scanDB:       deps.ScanDB,
+		cfg:               cfg,
+		mux:               http.NewServeMux(),
+		ai:                deps.AI,
+		automations:       deps.Automations,
+		catalog:           deps.Catalog,
+		downloads:         deps.Downloads,
+		integrations:      deps.Integrations,
+		libraries:         deps.Libraries,
+		localization:      deps.Localization,
+		mediaFiles:        deps.MediaFiles,
+		organizer:         deps.Organizer,
+		scraper:           deps.Scraper,
+		strm:              deps.STRM,
+		tasks:             deps.Tasks,
+		scanDB:            deps.ScanDB,
+		scraperHTTPClient: deps.ScraperHTTP,
 	}
 	server.routes()
 	return server
@@ -241,6 +245,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/collections", s.handleCreateCollection)
 	s.mux.HandleFunc("GET /api/collections/", s.handleGetCollection)
 	s.mux.HandleFunc("POST /api/collections/", s.handleCollectionAction)
+	s.mux.HandleFunc("GET /api/scrapers", s.handleListScrapers)
+	s.mux.HandleFunc("GET /api/scrapers/", s.handleScraperAction)
 	s.mux.HandleFunc("GET /api/scrape-candidates", s.handleListScrapeCandidates)
 	s.mux.HandleFunc("POST /api/scrape-candidates", s.handleCreateScrapeCandidate)
 	s.mux.HandleFunc("GET /api/scrape-decisions", s.handleListScrapeDecisions)
@@ -2476,6 +2482,119 @@ func (s *Server) handleListMediaByReference(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleListScrapers(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, []map[string]any{
+		{
+			"provider":    scraper.TMDBProvider,
+			"status":      "live",
+			"configured":  strings.TrimSpace(s.cfg.TMDBAPIKey) != "",
+			"media_types": []string{"movie", "tv"},
+			"purpose":     "电影/电视剧兜底元数据验证",
+		},
+		{
+			"provider":    "av",
+			"status":      "planned",
+			"configured":  false,
+			"media_types": []string{"av"},
+			"purpose":     "AV 番号元数据获取主线，按 JavDB/JavBus/FC2/MGStage/R18/Jav321 顺序验证",
+		},
+		{
+			"provider":    "douban",
+			"status":      "planned",
+			"configured":  false,
+			"media_types": []string{"movie", "tv"},
+			"purpose":     "中文电影/电视剧兜底补充",
+		},
+	})
+}
+
+func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/scrapers/"), "/")
+	provider, action, ok := strings.Cut(path, "/")
+	if !ok || provider == "" || action == "" {
+		writeError(w, http.StatusNotFound, fmt.Errorf("scraper action not found"))
+		return
+	}
+	if provider != scraper.TMDBProvider {
+		writeError(w, http.StatusNotImplemented, fmt.Errorf("scraper provider %q is not implemented yet", provider))
+		return
+	}
+
+	switch action {
+	case "search":
+		s.handleSearchScraper(w, r, s.tmdbClient())
+	case "fetch":
+		s.handleFetchScraper(w, r, s.tmdbClient())
+	default:
+		writeError(w, http.StatusNotFound, fmt.Errorf("scraper action %q not found", action))
+	}
+}
+
+func (s *Server) handleSearchScraper(w http.ResponseWriter, r *http.Request, client scraper.TMDBClient) {
+	year, err := optionalIntQuery(r, "year")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	query := scraper.SearchQuery{
+		MediaType: r.URL.Query().Get("media_type"),
+		Title:     r.URL.Query().Get("title"),
+		Year:      year,
+		Number:    r.URL.Query().Get("number"),
+		Language:  r.URL.Query().Get("language"),
+	}
+	candidates, err := client.Search(r.Context(), query)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":   client.Name(),
+		"media_type": query.MediaType,
+		"persisted":  false,
+		"count":      len(candidates),
+		"candidates": candidates,
+	})
+}
+
+func (s *Server) handleFetchScraper(w http.ResponseWriter, r *http.Request, client scraper.TMDBClient) {
+	metadata, err := client.FetchByID(
+		r.Context(),
+		r.URL.Query().Get("media_type"),
+		r.URL.Query().Get("external_id"),
+		r.URL.Query().Get("language"),
+	)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":   client.Name(),
+		"media_type": r.URL.Query().Get("media_type"),
+		"metadata":   metadata,
+	})
+}
+
+func (s *Server) tmdbClient() scraper.TMDBClient {
+	return scraper.TMDBClient{
+		BaseURL:    s.cfg.TMDBBaseURL,
+		APIKey:     s.cfg.TMDBAPIKey,
+		HTTPClient: s.scraperHTTPClient,
+	}
+}
+
+func optionalIntQuery(r *http.Request, key string) (int, error) {
+	value := strings.TrimSpace(r.URL.Query().Get(key))
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer", key)
+	}
+	return parsed, nil
 }
 
 func (s *Server) handleListScrapeCandidates(w http.ResponseWriter, r *http.Request) {

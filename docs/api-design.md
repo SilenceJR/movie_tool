@@ -127,6 +127,7 @@ GET /api/scrapers
 GET /api/scrapers/av/parse?number={number}
 GET /api/scrapers/av/search?number={number}&source=javdb
 GET /api/scrapers/av/fetch?external_id={providerScopedId}&source=javdb
+POST /api/scrapers/{provider}/candidates
 GET /api/scrapers/{provider}/search?media_type={movie|tv|av}&title={title}&year={year}&number={number}&language={language}
 GET /api/scrapers/{provider}/fetch?media_type={movie|tv|av}&external_id={externalId}&language={language}
 ```
@@ -136,6 +137,27 @@ GET /api/scrapers/{provider}/fetch?media_type={movie|tv|av}&external_id={externa
 - `tmdb`：电影/电视剧兜底源，配置 `TMDB_API_KEY` 与可选 `TMDB_BASE_URL` 后可用；`search` 与 `fetch` 默认只返回验证结果，不写入候选表。
 - `av/parse`：AV 番号解析和源路由验证，支持标准番号、FC2、HEYZO、CARIB/1PONDO/10MUSUME 等基础格式；只返回归一化番号和推荐抓取源顺序，不写入候选表。
 - `av/search` 与 `av/fetch`：当前默认 `source=javdb`，配置 `JAVDB_BASE_URL` 后可验证 JavDB 搜索页和详情页字段映射；详情会返回发行日期、时长、演员、片商、系列、标签等结构化字段，默认不写入候选表。
+- `POST /api/scrapers/{provider}/candidates`：显式把 live search/fetch 中确认可用的候选保存到 `scrape_candidates`，请求必须带 `media_id` 或 `media_file_id`，会复用现有候选评分和 `match_status` 刷新逻辑。
+
+保存 live candidate 示例：
+
+```json
+{
+  "media_id": "media-1",
+  "source": "javdb",
+  "candidate": {
+    "provider": "javdb",
+    "external_id": "javdb:/v/example",
+    "title": "SSNI-00123 Example Title",
+    "original_title": "SSNI-00123 Example Title",
+    "year": 2020,
+    "poster_url": "https://javdb.com/covers/ssni.jpg",
+    "overview": "Example overview",
+    "score": 90,
+    "score_reasons": ["番号精确匹配"]
+  }
+}
+```
 
 规划中：
 

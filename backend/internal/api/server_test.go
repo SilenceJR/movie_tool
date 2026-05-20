@@ -332,6 +332,57 @@ func TestFetchAVScraperUsesJavDB(t *testing.T) {
 	}
 }
 
+func TestSaveLiveScraperCandidate(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/scrapers/av/candidates", bytes.NewBufferString(`{
+		"media_id": "media-1",
+		"source": "javdb",
+		"raw_payload": "{\"source\":\"live\"}",
+		"candidate": {
+			"provider": "javdb",
+			"external_id": "javdb:/v/javdb-id",
+			"title": "SSNI-00123 Example Title",
+			"original_title": "SSNI-00123 Example Title",
+			"year": 2020,
+			"poster_url": "https://javdb.com/covers/ssni.jpg",
+			"overview": "Example overview",
+			"score": 90,
+			"score_reasons": ["番号精确匹配"]
+		}
+	}`))
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201 save candidate, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["persisted"] != true {
+		t.Fatalf("expected persisted response, got %#v", body)
+	}
+	candidate := body["candidate"].(map[string]any)
+	if candidate["provider"] != "javdb" || candidate["external_id"] != "javdb:/v/javdb-id" || candidate["media_id"] != "media-1" {
+		t.Fatalf("unexpected saved candidate: %#v", candidate)
+	}
+
+	listResponse := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/scrape-candidates?media_id=media-1", nil)
+	server.ServeHTTP(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 candidate list, got %d body=%s", listResponse.Code, listResponse.Body.String())
+	}
+	var stored []map[string]any
+	if err := json.NewDecoder(listResponse.Body).Decode(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || stored[0]["raw_payload"] != `{"source":"live"}` {
+		t.Fatalf("expected saved live candidate in store, got %#v", stored)
+	}
+}
+
 func TestCreateAndListLibraries(t *testing.T) {
 	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
 

@@ -247,6 +247,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/collections/", s.handleCollectionAction)
 	s.mux.HandleFunc("GET /api/scrapers", s.handleListScrapers)
 	s.mux.HandleFunc("GET /api/scrapers/", s.handleScraperAction)
+	s.mux.HandleFunc("POST /api/scrapers/", s.handleScraperAction)
 	s.mux.HandleFunc("GET /api/scrape-candidates", s.handleListScrapeCandidates)
 	s.mux.HandleFunc("POST /api/scrape-candidates", s.handleCreateScrapeCandidate)
 	s.mux.HandleFunc("GET /api/scrape-decisions", s.handleListScrapeDecisions)
@@ -2525,6 +2526,8 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 			s.handleSearchAVScraper(w, r)
 		case "fetch":
 			s.handleFetchAVScraper(w, r)
+		case "candidates":
+			s.handleSaveScraperCandidate(w, r, provider)
 		default:
 			writeError(w, http.StatusNotImplemented, fmt.Errorf("av scraper action %q is not implemented yet", action))
 		}
@@ -2536,6 +2539,8 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 			s.handleSearchJavDBScraper(w, r)
 		case "fetch":
 			s.handleFetchJavDBScraper(w, r)
+		case "candidates":
+			s.handleSaveScraperCandidate(w, r, provider)
 		default:
 			writeError(w, http.StatusNotFound, fmt.Errorf("scraper action %q not found", action))
 		}
@@ -2551,9 +2556,70 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 		s.handleSearchScraper(w, r, s.tmdbClient())
 	case "fetch":
 		s.handleFetchScraper(w, r, s.tmdbClient())
+	case "candidates":
+		s.handleSaveScraperCandidate(w, r, provider)
 	default:
 		writeError(w, http.StatusNotFound, fmt.Errorf("scraper action %q not found", action))
 	}
+}
+
+type saveScraperCandidateRequest struct {
+	MediaFileID string            `json:"media_file_id"`
+	MediaID     string            `json:"media_id"`
+	Source      string            `json:"source"`
+	Candidate   scraper.Candidate `json:"candidate"`
+	RawPayload  string            `json:"raw_payload"`
+}
+
+func (s *Server) handleSaveScraperCandidate(w http.ResponseWriter, r *http.Request, routeProvider string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var request saveScraperCandidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if request.MediaFileID == "" && request.MediaID == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("media_file_id or media_id is required"))
+		return
+	}
+	provider := firstNonEmpty(request.Candidate.Provider, request.Source, routeProvider)
+	if provider == scraper.AVProvider {
+		provider = firstNonEmpty(request.Source, scraper.JavDBProvider)
+	}
+	input := scraper.CandidateInput{
+		MediaFileID:   request.MediaFileID,
+		MediaID:       request.MediaID,
+		Provider:      provider,
+		ExternalID:    request.Candidate.ExternalID,
+		Title:         request.Candidate.Title,
+		OriginalTitle: request.Candidate.OriginalTitle,
+		Year:          request.Candidate.Year,
+		PosterURL:     request.Candidate.PosterURL,
+		Overview:      request.Candidate.Overview,
+		Score:         request.Candidate.Score,
+		ScoreReasons:  append([]string(nil), request.Candidate.ScoreReasons...),
+		RawPayload:    request.RawPayload,
+	}
+	if err := s.scoreScrapeCandidate(r.Context(), &input); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	created, err := s.scraper.CreateCandidate(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.refreshMatchStatus(r.Context(), created); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"persisted": true,
+		"candidate": created,
+	})
 }
 
 func (s *Server) handleSearchAVScraper(w http.ResponseWriter, r *http.Request) {

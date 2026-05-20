@@ -13,6 +13,7 @@ type SearchQuery struct {
 type Candidate struct {
 	Provider      string   `json:"provider"`
 	ExternalID    string   `json:"external_id"`
+	Number        string   `json:"number,omitempty"`
 	Title         string   `json:"title"`
 	OriginalTitle string   `json:"original_title"`
 	Year          int      `json:"year"`
@@ -25,12 +26,14 @@ type Candidate struct {
 type Metadata struct {
 	Provider       string   `json:"provider"`
 	ExternalID     string   `json:"external_id"`
+	Number         string   `json:"number,omitempty"`
 	Title          string   `json:"title"`
 	OriginalTitle  string   `json:"original_title"`
 	DisplayTitle   string   `json:"display_title"`
 	Language       string   `json:"language"`
 	Overview       string   `json:"overview"`
 	Year           int      `json:"year"`
+	PosterURL      string   `json:"poster_url,omitempty"`
 	ReleaseDate    string   `json:"release_date,omitempty"`
 	RuntimeMinutes int      `json:"runtime_minutes,omitempty"`
 	Studio         string   `json:"studio,omitempty"`

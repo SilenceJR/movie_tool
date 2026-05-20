@@ -32,7 +32,7 @@ func TestJavBusSearchParsesCandidates(t *testing.T) {
 		t.Fatalf("expected one candidate, got %#v", candidates)
 	}
 	candidate := candidates[0]
-	if candidate.Provider != "javbus" || candidate.ExternalID != "javbus:/SSNI-00123" || candidate.Year != 2020 || candidate.Score != 90 {
+	if candidate.Provider != "javbus" || candidate.ExternalID != "javbus:/SSNI-00123" || candidate.Number != "SSNI-00123" || candidate.Year != 2020 || candidate.Score != 90 {
 		t.Fatalf("unexpected candidate: %#v", candidate)
 	}
 	if candidate.PosterURL != "https://www.javbus.com/pics/ssni.jpg" {
@@ -49,6 +49,7 @@ func TestJavBusFetchParsesMetadata(t *testing.T) {
 			}
 			return htmlResponse(`
 				<h3>SSNI-00123 Example Title</h3>
+				<img src="/pics/ssni-detail.jpg">
 				<p><span>發行日期:</span> 2020-02-03</p>
 				<p><span>長度:</span> 120分鐘</p>
 				<p><span>製作商:</span><a>Example Studio</a></p>
@@ -63,10 +64,10 @@ func TestJavBusFetchParsesMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metadata.Provider != "javbus" || metadata.ExternalID != "javbus:/SSNI-00123" || metadata.Title != "SSNI-00123" || metadata.Year != 2020 {
+	if metadata.Provider != "javbus" || metadata.ExternalID != "javbus:/SSNI-00123" || metadata.Number != "SSNI-00123" || metadata.Title != "SSNI-00123" || metadata.Year != 2020 {
 		t.Fatalf("unexpected metadata: %#v", metadata)
 	}
-	if metadata.DisplayTitle != "Example Title" || metadata.RuntimeMinutes != 120 || metadata.Studio != "Example Studio" || metadata.Series != "Example Series" {
+	if metadata.DisplayTitle != "Example Title" || metadata.PosterURL != "https://www.javbus.com/pics/ssni-detail.jpg" || metadata.RuntimeMinutes != 120 || metadata.Studio != "Example Studio" || metadata.Series != "Example Series" {
 		t.Fatalf("unexpected metadata structured fields: %#v", metadata)
 	}
 	if strings.Join(metadata.Tags, ",") != "Drama,高清" {

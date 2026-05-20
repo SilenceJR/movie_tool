@@ -134,6 +134,7 @@ func parseJavDBSearch(body string, number AVNumber) []Candidate {
 		candidate := Candidate{
 			Provider:      JavDBProvider,
 			ExternalID:    JavDBProvider + ":" + path,
+			Number:        number.Normalized,
 			Title:         title,
 			OriginalTitle: title,
 			Year:          yearFromDate(extractText(javDBDatePattern, card)),
@@ -156,11 +157,13 @@ func parseJavDBDetail(body string, externalID string) *Metadata {
 	return &Metadata{
 		Provider:       JavDBProvider,
 		ExternalID:     normalizeJavDBExternalID(externalID),
+		Number:         number,
 		Title:          firstNonEmptyString(number, title),
 		OriginalTitle:  title,
 		DisplayTitle:   firstNonEmptyString(displayTitle, title),
 		Overview:       extractHTML(javDBDescriptionPat, body),
 		Year:           yearFromDate(releaseDate),
+		PosterURL:      absolutizeJavDBURL(extractText(javDBImagePattern, body)),
 		ReleaseDate:    releaseDate,
 		RuntimeMinutes: parseMinutes(extractJavDBFieldText(body, "時長", "时长", "片長", "片长", "Runtime", "Length")),
 		Studio:         firstString(extractJavDBFieldValues(body, "片商", "Studio", "Maker")),

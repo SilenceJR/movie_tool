@@ -129,6 +129,7 @@ func parseJavBusSearch(body string, number AVNumber) []Candidate {
 		candidate := Candidate{
 			Provider:      JavBusProvider,
 			ExternalID:    JavBusProvider + ":" + path,
+			Number:        number.Normalized,
 			Title:         title,
 			OriginalTitle: title,
 			Year:          yearFromDate(extractText(javBusDatePattern, card)),
@@ -152,10 +153,12 @@ func parseJavBusDetail(body string, externalID string) *Metadata {
 	return &Metadata{
 		Provider:       JavBusProvider,
 		ExternalID:     normalizeJavBusExternalID(externalID),
+		Number:         number,
 		Title:          firstNonEmptyString(number, title),
 		OriginalTitle:  title,
 		DisplayTitle:   firstNonEmptyString(displayTitle, title),
 		Year:           yearFromDate(releaseDate),
+		PosterURL:      absolutizeJavBusURL(extractText(javBusImagePattern, body)),
 		ReleaseDate:    releaseDate,
 		RuntimeMinutes: parseMinutes(extractText(javBusRuntimePattern, body) + "分"),
 		Studio:         extractHTML(javBusStudioPattern, body),

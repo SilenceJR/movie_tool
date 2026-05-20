@@ -33,7 +33,7 @@ func TestJavDBSearchParsesCandidates(t *testing.T) {
 		t.Fatalf("expected one candidate, got %#v", candidates)
 	}
 	candidate := candidates[0]
-	if candidate.ExternalID != "javdb:/v/javdb-id" || candidate.Year != 2020 || candidate.Score != 90 {
+	if candidate.ExternalID != "javdb:/v/javdb-id" || candidate.Number != "SSNI-00123" || candidate.Year != 2020 || candidate.Score != 90 {
 		t.Fatalf("unexpected candidate: %#v", candidate)
 	}
 	if candidate.PosterURL != "https://javdb.com/covers/ssni.jpg" {
@@ -50,6 +50,7 @@ func TestJavDBFetchParsesMetadata(t *testing.T) {
 			}
 			return htmlResponse(`
 				<h2>SSNI-00123 Example Title</h2>
+				<img src="/covers/ssni-detail.jpg">
 				<div class="release-date">2020-02-03</div>
 				<div class="description">Example overview</div>
 				<div class="field"><strong>日期:</strong><span>2020-02-03</span></div>
@@ -66,10 +67,10 @@ func TestJavDBFetchParsesMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metadata.Provider != "javdb" || metadata.ExternalID != "javdb:/v/javdb-id" || metadata.Title != "SSNI-00123" || metadata.Year != 2020 {
+	if metadata.Provider != "javdb" || metadata.ExternalID != "javdb:/v/javdb-id" || metadata.Number != "SSNI-00123" || metadata.Title != "SSNI-00123" || metadata.Year != 2020 {
 		t.Fatalf("unexpected metadata: %#v", metadata)
 	}
-	if metadata.DisplayTitle != "Example Title" || metadata.Overview != "Example overview" {
+	if metadata.DisplayTitle != "Example Title" || metadata.Overview != "Example overview" || metadata.PosterURL != "https://javdb.com/covers/ssni-detail.jpg" {
 		t.Fatalf("unexpected metadata text fields: %#v", metadata)
 	}
 	if metadata.ReleaseDate != "2020-02-03" || metadata.RuntimeMinutes != 120 || metadata.Studio != "Example Studio" || metadata.Series != "Example Series" {

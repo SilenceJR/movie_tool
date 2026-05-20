@@ -1331,6 +1331,67 @@ func TestRetryFailedMediaFile(t *testing.T) {
 	}
 }
 
+func TestRetryFailedMediaFilesByLibrary(t *testing.T) {
+	root := t.TempDir()
+	firstPath := filepath.Join(root, "Arrival.2016.1080p.WEB-DL.mkv")
+	secondPath := filepath.Join(root, "Missing.2020.mkv")
+	if err := os.WriteFile(firstPath, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+	libraryID := library["id"].(string)
+	first, err := server.mediaFiles.MarkFileFailed(context.Background(), media.FailedFileInput{
+		LibraryID:         libraryID,
+		Path:              firstPath,
+		DetectedMediaType: "movie",
+		ParsedTitle:       "Arrival",
+		ParsedYear:        2016,
+		Error:             "previous import failed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = server.mediaFiles.MarkFileFailed(context.Background(), media.FailedFileInput{
+		LibraryID:         libraryID,
+		Path:              secondPath,
+		DetectedMediaType: "movie",
+		ParsedTitle:       "Missing",
+		ParsedYear:        2020,
+		Error:             "previous import failed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/media-files/retry-failed?library_id="+libraryID, nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 retry failed files, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["count"] != float64(1) {
+		t.Fatalf("expected one imported file, got %#v", body)
+	}
+	failed := body["failed"].([]any)
+	if len(failed) != 1 || failed[0].(map[string]any)["path"] != secondPath {
+		t.Fatalf("expected missing file to remain failed, got %#v", failed)
+	}
+	updated, ok, err := server.mediaFiles.GetFile(context.Background(), first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || updated.Status != media.FileStatusAvailable {
+		t.Fatalf("expected first failed file to recover, got %#v ok=%v", updated, ok)
+	}
+}
+
 func TestScanLibraryMarksMissingFiles(t *testing.T) {
 	root := t.TempDir()
 	keepPath := filepath.Join(root, "Keep.2020.mkv")

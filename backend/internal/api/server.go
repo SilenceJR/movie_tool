@@ -212,6 +212,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/download-directories/", s.handleDownloadDirectoryAction)
 	s.mux.HandleFunc("DELETE /api/download-directories/", s.handleDeleteDownloadDirectory)
 	s.mux.HandleFunc("GET /api/media-files", s.handleListMediaFiles)
+	s.mux.HandleFunc("POST /api/media-files/retry-failed", s.handleRetryFailedMediaFiles)
 	s.mux.HandleFunc("POST /api/media-files/", s.handleMediaFileAction)
 	s.mux.HandleFunc("GET /api/media", s.handleListMedia)
 	s.mux.HandleFunc("POST /api/media", s.handleCreateMedia)
@@ -1482,37 +1483,9 @@ func (s *Server) handleRetryMediaFile(w http.ResponseWriter, r *http.Request, id
 		writeError(w, http.StatusBadRequest, fmt.Errorf("media file is not failed"))
 		return
 	}
-	library, ok, err := s.libraries.Get(r.Context(), file.LibraryID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if !ok {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("library not found"))
-		return
-	}
-	info, err := os.Stat(file.Path)
-	if err != nil {
-		taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "retry failed media file: "+file.FileName)
-		taskRecord, _ = s.tasks.Start(taskRecord.ID)
-		_ = s.recordScanImportFailure(r.Context(), parsedFileFromMediaFile(file), err)
-		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"task":   taskRecord,
-			"failed": []scanImportFailure{{Path: file.Path, Error: err.Error()}},
-		})
-		return
-	}
-	parsed := scanner.ParseFile(file.Path)
-	parsed.LibraryID = library.ID
-	parsed.LibraryName = library.Name
-	parsed.MediaType = firstNonEmpty(file.DetectedMediaType, string(library.MediaType))
-	parsed.Size = info.Size()
-	parsed.ModifiedAt = info.ModTime()
-
 	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "retry failed media file: "+file.FileName)
 	taskRecord, _ = s.tasks.Start(taskRecord.ID)
-	imported, failures, err := s.importFilesIndividually(r.Context(), []scanner.ParsedFile{parsed})
+	imported, failures, err := s.retryFailedMediaFile(r.Context(), file)
 	if err != nil {
 		taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
 		writeError(w, http.StatusInternalServerError, err)
@@ -1532,6 +1505,73 @@ func (s *Server) handleRetryMediaFile(w http.ResponseWriter, r *http.Request, id
 		"imported": imported,
 		"count":    len(imported),
 	})
+}
+
+func (s *Server) handleRetryFailedMediaFiles(w http.ResponseWriter, r *http.Request) {
+	libraryID := strings.TrimSpace(r.URL.Query().Get("library_id"))
+	if libraryID == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("library_id is required"))
+		return
+	}
+	if _, ok, err := s.libraries.Get(r.Context(), libraryID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	} else if !ok {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("library not found"))
+		return
+	}
+	files, err := s.mediaFiles.ListFiles(r.Context(), media.FileQuery{LibraryID: libraryID, Status: media.FileStatusFailed})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	taskRecord := s.tasks.Enqueue(task.TypeLibraryScan, "retry failed media files")
+	taskRecord, _ = s.tasks.Start(taskRecord.ID)
+	imported := make([]media.File, 0)
+	failures := make([]scanImportFailure, 0)
+	for _, file := range files {
+		fileImported, fileFailures, err := s.retryFailedMediaFile(r.Context(), file)
+		if err != nil {
+			taskRecord, _ = s.tasks.Fail(taskRecord.ID, err)
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		imported = append(imported, fileImported...)
+		failures = append(failures, fileFailures...)
+		for _, failure := range fileFailures {
+			s.tasks.Log(taskRecord.ID, task.LogLevelWarn, fmt.Sprintf("failed to retry %s: %s", failure.Path, failure.Error))
+		}
+	}
+	message := fmt.Sprintf("retried %d failed media files, succeeded %d, failed %d", len(files), len(imported), len(failures))
+	taskRecord, _ = s.tasks.Succeed(taskRecord.ID, message)
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"task":     taskRecord,
+		"imported": imported,
+		"failed":   failures,
+		"count":    len(imported),
+	})
+}
+
+func (s *Server) retryFailedMediaFile(ctx context.Context, file media.File) ([]media.File, []scanImportFailure, error) {
+	library, ok, err := s.libraries.Get(ctx, file.LibraryID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ok {
+		return nil, []scanImportFailure{{Path: file.Path, Error: "library not found"}}, nil
+	}
+	info, err := os.Stat(file.Path)
+	if err != nil {
+		_ = s.recordScanImportFailure(ctx, parsedFileFromMediaFile(file), err)
+		return nil, []scanImportFailure{{Path: file.Path, Error: err.Error()}}, nil
+	}
+	parsed := scanner.ParseFile(file.Path)
+	parsed.LibraryID = library.ID
+	parsed.LibraryName = library.Name
+	parsed.MediaType = firstNonEmpty(file.DetectedMediaType, string(library.MediaType))
+	parsed.Size = info.Size()
+	parsed.ModifiedAt = info.ModTime()
+	return s.importFilesIndividually(ctx, []scanner.ParsedFile{parsed})
 }
 
 func parsedFileFromMediaFile(file media.File) scanner.ParsedFile {

@@ -22,9 +22,14 @@ type Store interface {
 }
 
 type FileQuery struct {
-	LibraryID string
-	MediaID   string
-	Status    FileStatus
+	LibraryID         string
+	MediaID           string
+	Status            FileStatus
+	PathPrefix        string
+	DetectedMediaType string
+	FailureContains   string
+	FailedAfter       *time.Time
+	FailedBefore      *time.Time
 }
 
 type FileInput struct {
@@ -194,6 +199,25 @@ func (s *MemoryStore) ListFiles(_ context.Context, query FileQuery) ([]File, err
 		}
 		if query.Status != "" && file.Status != query.Status {
 			continue
+		}
+		if query.PathPrefix != "" && !strings.HasPrefix(file.NormalizedPath, normalizePath(query.PathPrefix)) {
+			continue
+		}
+		if query.DetectedMediaType != "" && file.DetectedMediaType != query.DetectedMediaType {
+			continue
+		}
+		if query.FailureContains != "" && !strings.Contains(strings.ToLower(file.FailureError), strings.ToLower(query.FailureContains)) {
+			continue
+		}
+		if query.FailedAfter != nil {
+			if file.FailedAt == nil || file.FailedAt.Before(query.FailedAfter.UTC()) {
+				continue
+			}
+		}
+		if query.FailedBefore != nil {
+			if file.FailedAt == nil || file.FailedAt.After(query.FailedBefore.UTC()) {
+				continue
+			}
 		}
 		files = append(files, file)
 	}

@@ -150,6 +150,45 @@ func TestMemoryStoreMarkFileFailedAndClearOnUpsert(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreListFilesFiltersFailures(t *testing.T) {
+	store := NewMemoryStore()
+	firstTime := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	secondTime := firstTime.Add(time.Hour)
+	store.now = func() time.Time { return firstTime }
+	if _, err := store.MarkFileFailed(context.Background(), FailedFileInput{
+		LibraryID:         "library-1",
+		Path:              "/downloads/retry/Arrival.2016.mkv",
+		DetectedMediaType: "movie",
+		Error:             "transient parser failure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.now = func() time.Time { return secondTime }
+	if _, err := store.MarkFileFailed(context.Background(), FailedFileInput{
+		LibraryID:         "library-1",
+		Path:              "/downloads/skip/Show.S01E01.mkv",
+		DetectedMediaType: "tv",
+		Error:             "permanent scanner failure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := store.ListFiles(context.Background(), FileQuery{
+		LibraryID:         "library-1",
+		Status:            FileStatusFailed,
+		PathPrefix:        "/downloads/retry",
+		DetectedMediaType: "movie",
+		FailureContains:   "parser",
+		FailedBefore:      &secondTime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "/downloads/retry/Arrival.2016.mkv" {
+		t.Fatalf("expected filtered retry file, got %#v", files)
+	}
+}
+
 func TestMemoryStoreUpdateFilePath(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)

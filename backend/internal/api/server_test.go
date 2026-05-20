@@ -1638,6 +1638,71 @@ func TestRetryFailedMediaFilesHonorsLimit(t *testing.T) {
 	}
 }
 
+func TestRetryFailedMediaFilesFiltersBatch(t *testing.T) {
+	root := t.TempDir()
+	retryRoot := filepath.Join(root, "retry")
+	skipRoot := filepath.Join(root, "skip")
+	retryPath := filepath.Join(retryRoot, "Arrival.2016.mkv")
+	skipPath := filepath.Join(skipRoot, "Dune.2021.mkv")
+	if err := os.MkdirAll(retryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(skipRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(retryPath, []byte("retry"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skipPath, []byte("skip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	library := createJSON(t, server, "/api/libraries", `{"name":"Movies","media_type":"movie","path":"`+root+`"}`)
+	libraryID := library["id"].(string)
+	if _, err := server.mediaFiles.MarkFileFailed(context.Background(), media.FailedFileInput{
+		LibraryID:         libraryID,
+		Path:              retryPath,
+		DetectedMediaType: "movie",
+		Error:             "transient parser failure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.mediaFiles.MarkFileFailed(context.Background(), media.FailedFileInput{
+		LibraryID:         libraryID,
+		Path:              skipPath,
+		DetectedMediaType: "movie",
+		Error:             "permanent scanner failure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	query := "?library_id=" + url.QueryEscape(libraryID) +
+		"&path_prefix=" + url.QueryEscape(retryRoot) +
+		"&media_type=movie&failure_contains=" + url.QueryEscape("parser")
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/media-files/retry-failed"+query, nil)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 filtered retry failed files, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["retry_count"] != float64(1) || body["failed_total"] != float64(1) || body["remaining"] != float64(0) {
+		t.Fatalf("expected filtered retry metadata, got %#v", body)
+	}
+	failedFiles, err := server.mediaFiles.ListFiles(context.Background(), media.FileQuery{LibraryID: libraryID, Status: media.FileStatusFailed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failedFiles) != 1 || failedFiles[0].Path != skipPath {
+		t.Fatalf("expected unfiltered failed file to remain, got %#v", failedFiles)
+	}
+}
+
 func TestScanLibraryMarksMissingFiles(t *testing.T) {
 	root := t.TempDir()
 	keepPath := filepath.Join(root, "Keep.2020.mkv")

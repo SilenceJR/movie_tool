@@ -1445,8 +1445,11 @@ func (s *Server) handleListMediaFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	files, err := s.mediaFiles.ListFiles(r.Context(), media.FileQuery{
-		LibraryID: libraryID,
-		Status:    media.FileStatus(r.URL.Query().Get("file_status")),
+		LibraryID:         libraryID,
+		Status:            media.FileStatus(r.URL.Query().Get("file_status")),
+		PathPrefix:        strings.TrimSpace(r.URL.Query().Get("path_prefix")),
+		DetectedMediaType: strings.TrimSpace(r.URL.Query().Get("media_type")),
+		FailureContains:   strings.TrimSpace(r.URL.Query().Get("failure_contains")),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -1529,7 +1532,25 @@ func (s *Server) handleRetryFailedMediaFiles(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, fmt.Errorf("library not found"))
 		return
 	}
-	files, err := s.mediaFiles.ListFiles(r.Context(), media.FileQuery{LibraryID: libraryID, Status: media.FileStatusFailed})
+	failedAfter, err := parseOptionalTimePointer(r.URL.Query().Get("failed_after"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	failedBefore, err := parseOptionalTimePointer(r.URL.Query().Get("failed_before"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	files, err := s.mediaFiles.ListFiles(r.Context(), media.FileQuery{
+		LibraryID:         libraryID,
+		Status:            media.FileStatusFailed,
+		PathPrefix:        strings.TrimSpace(r.URL.Query().Get("path_prefix")),
+		DetectedMediaType: strings.TrimSpace(r.URL.Query().Get("media_type")),
+		FailureContains:   strings.TrimSpace(r.URL.Query().Get("failure_contains")),
+		FailedAfter:       failedAfter,
+		FailedBefore:      failedBefore,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -3628,6 +3649,18 @@ func parseOptionalTime(value string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid time query value %q", value)
 	}
 	return parsed.UTC(), nil
+}
+
+func parseOptionalTimePointer(value string) (*time.Time, error) {
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid time query value %q", value)
+	}
+	parsed = parsed.UTC()
+	return &parsed, nil
 }
 
 func parseBoolQuery(value string) (bool, error) {

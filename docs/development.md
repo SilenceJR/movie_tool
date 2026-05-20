@@ -98,7 +98,7 @@ backend/internal/task         任务系统
 - 生产 SQLite 路径下，扫描导入会在同一事务内完成 media item、version、media_file 与 missing 标记更新；内存 store 保持原有测试路径。
 - 扫描入口支持 `batch_size`，可把超大目录的导入拆成多批事务，并在响应中返回 `batch_count`。
 - 扫描入口支持 `continue_on_error=true`，批次失败时会退回单文件导入，并在响应、任务日志和 `media_files` 的 `failed` 状态中记录失败文件与失败原因，避免个别坏文件阻断整批入库。
-- 失败媒体文件可通过 `POST /api/media-files/{id}/retry` 单个重试，也可通过 `POST /api/media-files/retry-failed?library_id=...&limit=...` 按媒体库限量批量重试；重试成功会清除 `failed` 状态、失败原因和失败时间。
+- 失败媒体文件可通过 `POST /api/media-files/{id}/retry` 单个重试，也可通过 `POST /api/media-files/retry-failed?library_id=...&limit=...` 按媒体库限量批量重试；批量重试支持 `path_prefix`、`media_type`、`failure_contains`、`failed_after`、`failed_before` 过滤，重试成功会清除 `failed` 状态、失败原因和失败时间。
 
 ### scraper
 

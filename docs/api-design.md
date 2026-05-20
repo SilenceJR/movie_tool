@@ -45,7 +45,7 @@ DELETE /api/download-directories/{id}
 POST /api/download-directories/{id}/scan
 POST /api/download-directories/watch/run
 POST /api/media-files/{id}/retry
-POST /api/media-files/retry-failed?library_id={libraryId}&limit={n}
+POST /api/media-files/retry-failed?library_id={libraryId}&limit={n}&path_prefix={path}&media_type={type}&failure_contains={text}&failed_after={rfc3339}&failed_before={rfc3339}
 POST /api/organizer/plans/{id}/rollback
 ```
 

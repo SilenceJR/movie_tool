@@ -297,7 +297,7 @@ WHERE id = ?`,
 
 func (s *SQLStore) ListFiles(ctx context.Context, query FileQuery) ([]File, error) {
 	where := "WHERE 1 = 1"
-	args := make([]any, 0, 2)
+	args := make([]any, 0, 8)
 	if query.LibraryID != "" {
 		where += " AND library_id = ?"
 		args = append(args, query.LibraryID)
@@ -309,6 +309,26 @@ func (s *SQLStore) ListFiles(ctx context.Context, query FileQuery) ([]File, erro
 	if query.Status != "" {
 		where += " AND file_status = ?"
 		args = append(args, string(query.Status))
+	}
+	if query.PathPrefix != "" {
+		where += " AND normalized_path LIKE ?"
+		args = append(args, normalizePath(query.PathPrefix)+"%")
+	}
+	if query.DetectedMediaType != "" {
+		where += " AND detected_media_type = ?"
+		args = append(args, query.DetectedMediaType)
+	}
+	if query.FailureContains != "" {
+		where += " AND lower(failure_error) LIKE ?"
+		args = append(args, "%"+strings.ToLower(query.FailureContains)+"%")
+	}
+	if query.FailedAfter != nil {
+		where += " AND failed_at >= ?"
+		args = append(args, query.FailedAfter.UTC().Format(time.RFC3339Nano))
+	}
+	if query.FailedBefore != nil {
+		where += " AND failed_at <= ?"
+		args = append(args, query.FailedBefore.UTC().Format(time.RFC3339Nano))
 	}
 
 	rows, err := s.db.QueryContext(ctx, `

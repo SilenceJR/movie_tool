@@ -2496,10 +2496,10 @@ func (s *Server) handleListScrapers(w http.ResponseWriter, _ *http.Request) {
 		},
 		{
 			"provider":    scraper.AVProvider,
-			"status":      "javdb_live",
+			"status":      "multi_source_live",
 			"configured":  true,
 			"media_types": []string{"av"},
-			"purpose":     "AV 番号解析和 JavDB search/fetch 已可验证，后续按 JavBus/FC2/MGStage/R18/Jav321 顺序扩展",
+			"purpose":     "AV 番号解析、JavDB 与 JavBus search/fetch 已可验证，后续按 FC2/MGStage/R18/Jav321 顺序扩展",
 		},
 		{
 			"provider":    "douban",
@@ -2539,6 +2539,19 @@ func (s *Server) handleScraperAction(w http.ResponseWriter, r *http.Request) {
 			s.handleSearchJavDBScraper(w, r)
 		case "fetch":
 			s.handleFetchJavDBScraper(w, r)
+		case "candidates":
+			s.handleSaveScraperCandidate(w, r, provider)
+		default:
+			writeError(w, http.StatusNotFound, fmt.Errorf("scraper action %q not found", action))
+		}
+		return
+	}
+	if provider == scraper.JavBusProvider {
+		switch action {
+		case "search":
+			s.handleSearchJavBusScraper(w, r)
+		case "fetch":
+			s.handleFetchJavBusScraper(w, r)
 		case "candidates":
 			s.handleSaveScraperCandidate(w, r, provider)
 		default:
@@ -2627,6 +2640,8 @@ func (s *Server) handleSearchAVScraper(w http.ResponseWriter, r *http.Request) {
 	switch source {
 	case scraper.JavDBProvider:
 		s.handleSearchJavDBScraper(w, r)
+	case scraper.JavBusProvider:
+		s.handleSearchJavBusScraper(w, r)
 	default:
 		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
 	}
@@ -2637,6 +2652,8 @@ func (s *Server) handleFetchAVScraper(w http.ResponseWriter, r *http.Request) {
 	switch source {
 	case scraper.JavDBProvider:
 		s.handleFetchJavDBScraper(w, r)
+	case scraper.JavBusProvider:
+		s.handleFetchJavBusScraper(w, r)
 	default:
 		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", source))
 	}
@@ -2681,6 +2698,49 @@ func (s *Server) handleFetchJavDBScraper(w http.ResponseWriter, r *http.Request)
 func (s *Server) javdbClient() scraper.JavDBClient {
 	return scraper.JavDBClient{
 		BaseURL:    s.cfg.JavDBBaseURL,
+		HTTPClient: s.scraperHTTPClient,
+	}
+}
+
+func (s *Server) handleSearchJavBusScraper(w http.ResponseWriter, r *http.Request) {
+	query := scraper.SearchQuery{
+		MediaType: "av",
+		Title:     r.URL.Query().Get("title"),
+		Number:    r.URL.Query().Get("number"),
+		Language:  r.URL.Query().Get("language"),
+	}
+	candidates, err := s.javbusClient().Search(r.Context(), query)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":   scraper.AVProvider,
+		"source":     scraper.JavBusProvider,
+		"media_type": "av",
+		"persisted":  false,
+		"count":      len(candidates),
+		"candidates": candidates,
+	})
+}
+
+func (s *Server) handleFetchJavBusScraper(w http.ResponseWriter, r *http.Request) {
+	metadata, err := s.javbusClient().FetchByID(r.Context(), r.URL.Query().Get("external_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider":   scraper.AVProvider,
+		"source":     scraper.JavBusProvider,
+		"media_type": "av",
+		"metadata":   metadata,
+	})
+}
+
+func (s *Server) javbusClient() scraper.JavBusClient {
+	return scraper.JavBusClient{
+		BaseURL:    s.cfg.JavBusBaseURL,
 		HTTPClient: s.scraperHTTPClient,
 	}
 }

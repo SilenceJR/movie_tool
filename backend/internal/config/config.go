@@ -23,6 +23,7 @@ type Config struct {
 	TMDBBaseURL               string
 	TMDBAPIKey                string
 	JavDBBaseURL              string
+	JavBusBaseURL             string
 }
 
 func Load() Config {
@@ -44,6 +45,7 @@ func Load() Config {
 		TMDBBaseURL:               env("TMDB_BASE_URL", "https://api.themoviedb.org"),
 		TMDBAPIKey:                env("TMDB_API_KEY", ""),
 		JavDBBaseURL:              env("JAVDB_BASE_URL", "https://javdb.com"),
+		JavBusBaseURL:             env("JAVBUS_BASE_URL", "https://www.javbus.com"),
 	}
 }
 

@@ -10,7 +10,9 @@
 GET /api/scrapers
 GET /api/scrapers/av/parse?number=FC2-PPV-1234567
 GET /api/scrapers/av/search?number=SSNI-00123&source=javdb
+GET /api/scrapers/av/search?number=SSNI-00123&source=javbus
 GET /api/scrapers/av/fetch?external_id=javdb:/v/example&source=javdb
+GET /api/scrapers/av/fetch?external_id=javbus:/SSNI-00123&source=javbus
 POST /api/scrapers/av/candidates
 GET /api/scrapers/tmdb/search?media_type=movie&title=Inception&year=2010&language=zh-CN
 GET /api/scrapers/tmdb/fetch?media_type=movie&external_id=27205&language=zh-CN
@@ -19,6 +21,7 @@ GET /api/scrapers/tmdb/fetch?media_type=movie&external_id=27205&language=zh-CN
 `tmdb` 使用 `TMDB_API_KEY` 鉴权，`TMDB_BASE_URL` 默认 `https://api.themoviedb.org`。搜索/详情接口默认只验证远端可获取和字段映射，不直接写入 `scrape_candidates`，后续由显式“保存候选/选择候选”流程入库。
 `av/parse` 已支持番号归一化和源路由验证，返回 `normalized`、`kind`、`prefix`、`digits`、`preferred_providers`，为后续逐平台 live search/fetch 提供稳定入口。
 `av/search` 与 `av/fetch` 已接入第一版 JavDB HTML 源解析，`JAVDB_BASE_URL` 默认 `https://javdb.com`；该实现用于验证搜索页/详情页可获取与字段映射，可返回发行日期、时长、演员、片商、系列、标签等结构化字段，默认不写入数据库。
+`source=javbus` 已接入第一版 JavBus HTML 源解析，`JAVBUS_BASE_URL` 默认 `https://www.javbus.com`；当前用于验证搜索页/详情页可获取和字段映射，默认不写入数据库。
 `POST /api/scrapers/{provider}/candidates` 用于显式保存已经验证过的 live candidate，必须绑定 `media_id` 或 `media_file_id`，并复用现有候选评分和匹配状态刷新流程。
 
 ### 普通媒体
@@ -49,7 +52,7 @@ AV provider 接入顺序：
 
 ```text
 1. 番号解析与源路由：ABC-123、FC2-PPV-1234567、HEYZO-1234、CARIB-123456-789 已有基础实现。
-2. live search/fetch 验证：JavDB 已有第一版 search/fetch，先返回候选、封面、发行日期、时长、演员、片商、系列、标签、简介，不写库。
+2. live search/fetch 验证：JavDB/JavBus 已有第一版 search/fetch，先返回候选、封面、发行日期、时长、片商、系列、标签等字段，不写库。
 3. 字段归一化：番号、原始标题、中文标题、发行日期、时长、演员、片商、系列、标签、封面。
 4. 候选评分：番号精确匹配优先，再参考标题、年份/发行日期、演员、片商。
 5. 显式入库：验证通过后通过 `POST /api/scrapers/{provider}/candidates` 写入 scrape_candidates，再进入人工选择或自动决策。

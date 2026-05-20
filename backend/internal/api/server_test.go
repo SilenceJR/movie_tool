@@ -2273,6 +2273,19 @@ func TestRunDownloadDirectoryWatchScansOnlyEnabledWatchDirectories(t *testing.T)
 	if summaryEntry["organizer_plan_id"] != plan["id"] {
 		t.Fatalf("expected summary to expose organizer plan id, got %#v", summaryEntry)
 	}
+	logsResponse := httptest.NewRecorder()
+	logsRequest := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskBody["id"].(string)+"/logs", nil)
+	server.ServeHTTP(logsResponse, logsRequest)
+	if logsResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 watch task logs, got %d body=%s", logsResponse.Code, logsResponse.Body.String())
+	}
+	var logs []map[string]any
+	if err := json.NewDecoder(logsResponse.Body).Decode(&logs); err != nil {
+		t.Fatal(err)
+	}
+	if !logMessagesContain(logs, "watch directory Watched succeeded: discovered 1, imported 1, failed files 0") {
+		t.Fatalf("expected directory success summary log, got %#v", logs)
+	}
 }
 
 func TestRunDownloadDirectoryWatchReportsDirectoryFailures(t *testing.T) {
@@ -2309,6 +2322,20 @@ func TestRunDownloadDirectoryWatchReportsDirectoryFailures(t *testing.T) {
 	summaryEntry := summary[0].(map[string]any)
 	if summaryEntry["download_directory_id"] != directory["id"] || summaryEntry["status"] != "failed" || summaryEntry["status_code"] != float64(http.StatusBadRequest) || summaryEntry["error"] == "" {
 		t.Fatalf("expected failed watch summary entry, got %#v", summaryEntry)
+	}
+	taskBody := body["task"].(map[string]any)
+	logsResponse := httptest.NewRecorder()
+	logsRequest := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskBody["id"].(string)+"/logs", nil)
+	server.ServeHTTP(logsResponse, logsRequest)
+	if logsResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 watch task logs, got %d body=%s", logsResponse.Code, logsResponse.Body.String())
+	}
+	var logs []map[string]any
+	if err := json.NewDecoder(logsResponse.Body).Decode(&logs); err != nil {
+		t.Fatal(err)
+	}
+	if !logMessagesContain(logs, "failed to scan Missing download:") {
+		t.Fatalf("expected directory failure summary log, got %#v", logs)
 	}
 }
 
@@ -2930,4 +2957,14 @@ func TestConfig(t *testing.T) {
 	if body["database"] != "./data/movie-tool.db" {
 		t.Fatalf("expected database config, got %q", body["database"])
 	}
+}
+
+func logMessagesContain(logs []map[string]any, want string) bool {
+	for _, log := range logs {
+		message, _ := log["message"].(string)
+		if strings.Contains(message, want) {
+			return true
+		}
+	}
+	return false
 }

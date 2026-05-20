@@ -991,6 +991,17 @@ func (s *Server) RunDownloadDirectoryWatch(ctx context.Context, options download
 		if result.OrganizerPlan != nil {
 			planCount++
 		}
+		if taskRecord != nil {
+			s.tasks.Log(taskRecord.ID, task.LogLevelInfo, fmt.Sprintf(
+				"watch directory %s succeeded: discovered %d, imported %d, failed files %d, batches %d%s",
+				directory.Name,
+				len(result.Files),
+				len(result.Imported),
+				len(result.Failed),
+				result.BatchCount,
+				formatOrganizerPlanLogSuffix(result.OrganizerPlan),
+			))
+		}
 		summary = append(summary, downloadDirectoryWatchSummary{
 			DownloadDirectoryID:   directory.ID,
 			DownloadDirectoryName: directory.Name,
@@ -1097,6 +1108,13 @@ func organizerPlanID(plan *organizer.Plan) string {
 		return ""
 	}
 	return plan.ID
+}
+
+func formatOrganizerPlanLogSuffix(plan *organizer.Plan) string {
+	if plan == nil {
+		return ""
+	}
+	return ", organizer plan " + plan.ID
 }
 
 func parseDownloadScanOptions(r *http.Request) (downloadScanOptions, error) {

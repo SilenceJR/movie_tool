@@ -225,6 +225,14 @@ rename
 overwrite_with_confirmation
 ```
 
+冲突处理：
+
+```http
+POST /api/organizer/plans/{id}/skip-conflicts
+POST /api/organizer/plans/{id}/rename-conflicts
+POST /api/organizer/plans/{id}/confirm-overwrite-conflicts
+```
+
 ## 13. 外部服务器集成
 
 ```http

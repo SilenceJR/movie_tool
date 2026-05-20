@@ -50,3 +50,24 @@ func RenameConflicts(plan Plan, now time.Time, targetExists func(string) bool) (
 	}
 	return plan, changed
 }
+
+func ConfirmOverwriteConflicts(plan Plan, now time.Time) (Plan, int) {
+	changed := 0
+	for index, action := range plan.Actions {
+		if action.Status != ActionConflict || action.ConflictReason != ConflictReasonTargetPathExists {
+			continue
+		}
+		action.Status = ActionPending
+		action.ConflictReason = ConflictReasonOverwriteConfirmed
+		action.Error = ""
+		action.ExecutedAt = nil
+		plan.Actions[index] = action
+		changed++
+	}
+	if changed > 0 {
+		plan.Status = PlanReady
+		plan.Summary = SummarizeActions(plan.Actions)
+		plan.UpdatedAt = now.UTC()
+	}
+	return plan, changed
+}

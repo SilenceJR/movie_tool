@@ -16,6 +16,7 @@ import (
 	"movie-tool/backend/internal/catalog"
 	"movie-tool/backend/internal/config"
 	"movie-tool/backend/internal/media"
+	"movie-tool/backend/internal/organizer"
 	"movie-tool/backend/internal/scanner"
 	"movie-tool/backend/internal/task"
 )
@@ -879,6 +880,64 @@ func TestRenameOrganizerPlanConflicts(t *testing.T) {
 	want := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p (2).mkv")
 	if action["status"] != "pending" || action["target_path"] != want {
 		t.Fatalf("expected pending renamed conflict target %q, got %#v", want, action)
+	}
+}
+
+func TestConfirmOrganizerPlanOverwriteConflicts(t *testing.T) {
+	server := NewServer(config.Config{Host: "127.0.0.1", Port: "0"})
+	root := t.TempDir()
+	source := filepath.Join(root, "downloads", "Inception.mkv")
+	targetRoot := filepath.Join(root, "library")
+	existingTarget := filepath.Join(targetRoot, "Inception (2010)", "Inception - 1080p.mkv")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(existingTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(existingTarget, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := createJSON(t, server, "/api/organizer/plan", `{
+		"media":{"id":"m1","library_id":"l1","media_type":"movie","title":"Inception","year":2010},
+		"versions":[{"id":"v1","resolution":"1080p"}],
+		"files":[{"id":"f1","media_id":"m1","version_id":"v1","path":"`+source+`"}],
+		"rule":{"library_id":"l1","target_root":"`+targetRoot+`","folder_template":"{{title}} ({{year}})","file_template":"{{title}} - {{resolution}}","action_mode":"copy","conflict_policy":"overwrite_with_confirmation","enabled":true}
+	}`)
+
+	confirmResponse := httptest.NewRecorder()
+	confirmRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+plan["id"].(string)+"/confirm-overwrite-conflicts", nil)
+	server.ServeHTTP(confirmResponse, confirmRequest)
+	if confirmResponse.Code != http.StatusOK {
+		t.Fatalf("expected 200 confirm overwrite conflicts, got %d body=%s", confirmResponse.Code, confirmResponse.Body.String())
+	}
+	var confirmBody map[string]any
+	if err := json.NewDecoder(confirmResponse.Body).Decode(&confirmBody); err != nil {
+		t.Fatal(err)
+	}
+	confirmed := confirmBody["plan"].(map[string]any)
+	actions := confirmed["actions"].([]any)
+	action := actions[0].(map[string]any)
+	if action["status"] != "pending" || action["conflict_reason"] != organizer.ConflictReasonOverwriteConfirmed {
+		t.Fatalf("expected pending confirmed overwrite action, got %#v", action)
+	}
+
+	executeResponse := httptest.NewRecorder()
+	executeRequest := httptest.NewRequest(http.MethodPost, "/api/organizer/plans/"+plan["id"].(string)+"/execute", nil)
+	server.ServeHTTP(executeResponse, executeRequest)
+	if executeResponse.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 execute after confirm overwrite, got %d body=%s", executeResponse.Code, executeResponse.Body.String())
+	}
+	content, err := os.ReadFile(existingTarget)
+	if err != nil {
+		t.Fatalf("expected overwritten target: %v", err)
+	}
+	if string(content) != "movie" {
+		t.Fatalf("expected overwritten target content, got %q", string(content))
 	}
 }
 

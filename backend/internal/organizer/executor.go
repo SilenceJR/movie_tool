@@ -51,6 +51,7 @@ func (e Executor) Execute(ctx context.Context, plan Plan) Plan {
 			continue
 		}
 		action.Status = ActionSucceeded
+		action.ConflictReason = ""
 		action.Error = ""
 		action.ExecutedAt = &now
 		plan.Actions[index] = action
@@ -66,6 +67,11 @@ func (e Executor) executeAction(action Action) error {
 	ops := e.Ops
 	if ops == nil {
 		ops = OSFileOps{}
+	}
+	if action.ConflictReason == ConflictReasonOverwriteConfirmed {
+		if err := removeTargetForOverwrite(action.TargetPath); err != nil {
+			return err
+		}
 	}
 	switch action.ActionType {
 	case ActionMove:
@@ -86,6 +92,13 @@ func (e Executor) now() time.Time {
 		return e.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func removeTargetForOverwrite(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove existing target before overwrite: %w", err)
+	}
+	return nil
 }
 
 func failAction(action Action, now time.Time, err error) Action {

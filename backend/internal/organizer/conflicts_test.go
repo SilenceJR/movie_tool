@@ -49,3 +49,27 @@ func TestRenameConflictsMovesConflictActionsToNextAvailableTarget(t *testing.T) 
 		t.Fatalf("unexpected summary after rename: %+v", plan.Summary)
 	}
 }
+
+func TestConfirmOverwriteConflictsMarksExistingTargetConflictsPending(t *testing.T) {
+	plan, changed := ConfirmOverwriteConflicts(Plan{
+		ID:     "plan-1",
+		Status: PlanReady,
+		Actions: []Action{
+			{ID: "a1", SourcePath: "/downloads/a.mkv", TargetPath: "/library/a.mkv", Status: ActionConflict, ConflictReason: ConflictReasonTargetPathExists},
+			{ID: "a2", SourcePath: "/downloads/b.mkv", TargetPath: "/library/a.mkv", Status: ActionConflict, ConflictReason: ConflictReasonDuplicateTargetPath},
+		},
+	}, fixedNow())
+
+	if changed != 1 {
+		t.Fatalf("expected one changed action, got %d", changed)
+	}
+	if plan.Actions[0].Status != ActionPending || plan.Actions[0].ConflictReason != ConflictReasonOverwriteConfirmed {
+		t.Fatalf("expected existing target conflict to be confirmed, got %+v", plan.Actions[0])
+	}
+	if plan.Actions[1].Status != ActionConflict || plan.Actions[1].ConflictReason != ConflictReasonDuplicateTargetPath {
+		t.Fatalf("expected duplicate target conflict to stay unchanged, got %+v", plan.Actions[1])
+	}
+	if plan.Summary.TotalActions != 2 || plan.Summary.ConflictCount != 1 {
+		t.Fatalf("unexpected summary after confirm overwrite: %+v", plan.Summary)
+	}
+}

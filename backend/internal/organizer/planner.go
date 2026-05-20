@@ -120,10 +120,10 @@ func (p Planner) Build(request PlanRequest) (Plan, error) {
 		targetPath := filepath.Join(rule.TargetRoot, cleanRelativePath(folder), cleanFileName(name)+fileExtension(file))
 		status, conflictReason := ActionPending, ""
 		if previousSource, ok := seenTargets[targetPath]; ok && previousSource != file.Path {
-			targetPath, status, conflictReason = p.resolveConflict(rule, targetPath, "duplicate target path in plan", seenTargets)
+			targetPath, status, conflictReason = p.resolveConflict(rule, targetPath, ConflictReasonDuplicateTargetPath, seenTargets)
 		}
 		if status == ActionPending && p.targetExists(targetPath) && !samePath(targetPath, file.Path) {
-			targetPath, status, conflictReason = p.resolveConflict(rule, targetPath, "target path already exists", seenTargets)
+			targetPath, status, conflictReason = p.resolveConflict(rule, targetPath, ConflictReasonTargetPathExists, seenTargets)
 		}
 		action := Action{
 			ID:             "action-" + strconv.Itoa(index+1),

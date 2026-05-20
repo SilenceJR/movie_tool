@@ -2910,6 +2910,8 @@ func (s *Server) handleOrganizerPlanAction(w http.ResponseWriter, r *http.Reques
 		s.handleSkipOrganizerPlanConflicts(w, r, id)
 	case "rename-conflicts":
 		s.handleRenameOrganizerPlanConflicts(w, r, id)
+	case "confirm-overwrite-conflicts":
+		s.handleConfirmOrganizerPlanOverwriteConflicts(w, r, id)
 	case "cancel":
 		s.handleCancelOrganizerPlan(w, r, id)
 	default:
@@ -3046,6 +3048,36 @@ func (s *Server) handleRenameOrganizerPlanConflicts(w http.ResponseWriter, r *ht
 	updated, changed := organizer.RenameConflicts(plan, time.Now().UTC(), pathExists)
 	if changed == 0 {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no conflicts to rename"))
+		return
+	}
+	saved, err := s.organizer.UpdatePlan(r.Context(), updated)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plan":    saved,
+		"changed": changed,
+	})
+}
+
+func (s *Server) handleConfirmOrganizerPlanOverwriteConflicts(w http.ResponseWriter, r *http.Request, id string) {
+	plan, ok, err := s.organizer.GetPlan(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Errorf("organizer plan not found"))
+		return
+	}
+	if plan.Status == organizer.PlanSucceeded || plan.Status == organizer.PlanCanceled {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan conflicts cannot be confirmed from status %q", plan.Status))
+		return
+	}
+	updated, changed := organizer.ConfirmOverwriteConflicts(plan, time.Now().UTC())
+	if changed == 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("organizer plan has no overwrite conflicts to confirm"))
 		return
 	}
 	saved, err := s.organizer.UpdatePlan(r.Context(), updated)

@@ -19,6 +19,12 @@ const (
 	ConflictOverwriteWithConfirmation ConflictPolicy = "overwrite_with_confirmation"
 )
 
+const (
+	ConflictReasonDuplicateTargetPath = "duplicate target path in plan"
+	ConflictReasonTargetPathExists    = "target path already exists"
+	ConflictReasonOverwriteConfirmed  = "overwrite confirmed"
+)
+
 type PlanStatus string
 
 const (

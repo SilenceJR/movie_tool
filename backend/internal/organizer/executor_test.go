@@ -99,8 +99,83 @@ func TestOSFileOpsCopyAndHardlink(t *testing.T) {
 	assertFileContent(t, linkTarget, "movie")
 }
 
+func TestExecutorOverwritesConfirmedTarget(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source.mkv")
+	target := filepath.Join(root, "library", "target.mkv")
+	writeTestFile(t, source, "new movie")
+	writeTestFile(t, target, "old movie")
+
+	executor := Executor{Now: fixedNow, Ops: OSFileOps{}}
+	plan := executor.Execute(context.Background(), Plan{
+		ID:        "plan-1",
+		Status:    PlanReady,
+		DryRun:    true,
+		CreatedAt: fixedNow(),
+		UpdatedAt: fixedNow(),
+		Actions: []Action{
+			{
+				ID:             "a1",
+				ActionType:     ActionCopy,
+				SourcePath:     source,
+				TargetPath:     target,
+				Status:         ActionPending,
+				ConflictReason: ConflictReasonOverwriteConfirmed,
+			},
+		},
+	})
+
+	if plan.Status != PlanSucceeded {
+		t.Fatalf("expected succeeded plan, got %s", plan.Status)
+	}
+	if plan.Actions[0].Status != ActionSucceeded || plan.Actions[0].ConflictReason != "" {
+		t.Fatalf("expected clean succeeded overwrite action, got %+v", plan.Actions[0])
+	}
+	assertFileContent(t, target, "new movie")
+}
+
+func TestExecutorFailsConfirmedOverwriteWhenTargetIsDirectory(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source.mkv")
+	target := filepath.Join(root, "library", "target.mkv")
+	writeTestFile(t, source, "movie")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(target, "nested.txt"), "nested")
+
+	executor := Executor{Now: fixedNow, Ops: OSFileOps{}}
+	plan := executor.Execute(context.Background(), Plan{
+		ID:        "plan-1",
+		Status:    PlanReady,
+		DryRun:    true,
+		CreatedAt: fixedNow(),
+		UpdatedAt: fixedNow(),
+		Actions: []Action{
+			{
+				ID:             "a1",
+				ActionType:     ActionCopy,
+				SourcePath:     source,
+				TargetPath:     target,
+				Status:         ActionPending,
+				ConflictReason: ConflictReasonOverwriteConfirmed,
+			},
+		},
+	})
+
+	if plan.Status != PlanFailed || plan.Actions[0].Status != ActionFailed {
+		t.Fatalf("expected failed overwrite plan, got %+v", plan)
+	}
+	if plan.Actions[0].Error == "" {
+		t.Fatalf("expected overwrite failure error, got %+v", plan.Actions[0])
+	}
+}
+
 func writeTestFile(t *testing.T, path string, content string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

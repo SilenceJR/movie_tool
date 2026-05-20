@@ -114,6 +114,8 @@ var (
 	javBusStudioPattern  = regexp.MustCompile(`(?is)(?:製作商|制作商|片商|Studio)[：:\s]*</span>\s*<a[^>]*>(.*?)</a>`)
 	javBusSeriesPattern  = regexp.MustCompile(`(?is)(?:系列|Series)[：:\s]*</span>\s*<a[^>]*>(.*?)</a>`)
 	javBusRuntimePattern = regexp.MustCompile(`(?is)(?:長度|长度|Runtime)[：:\s]*</span>\s*(\d{1,4})`)
+	javBusActorBlockPat  = regexp.MustCompile(`(?is)(?:演員|演员|Actress|Actor|Cast)[：:\s]*</span>(.*?)</p>`)
+	javBusStarLinkPat    = regexp.MustCompile(`(?is)<a[^>]+class=["'][^"']*(?:star-name|avatar-box|star-box)[^"']*["'][^>]*>(.*?)</a>`)
 )
 
 func parseJavBusSearch(body string, number AVNumber) []Candidate {
@@ -163,7 +165,7 @@ func parseJavBusDetail(body string, externalID string) *Metadata {
 		RuntimeMinutes: parseMinutes(extractText(javBusRuntimePattern, body) + "分"),
 		Studio:         extractHTML(javBusStudioPattern, body),
 		Series:         extractHTML(javBusSeriesPattern, body),
-		Actors:         nil,
+		Actors:         extractJavBusActors(body),
 		Tags:           tags,
 	}
 }
@@ -202,6 +204,20 @@ func extractJavBusAnchors(values []string) []string {
 		}
 	}
 	return uniqueStrings(result)
+}
+
+func extractJavBusActors(body string) []string {
+	values := extractJavBusAnchors(javBusActorBlockPat.FindAllString(body, -1))
+	for _, match := range javBusStarLinkPat.FindAllStringSubmatch(body, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		text := stripTags(match[1])
+		if text != "" {
+			values = append(values, text)
+		}
+	}
+	return uniqueStrings(values)
 }
 
 func absolutizeJavBusURL(value string) string {

@@ -54,6 +54,8 @@ func TestJavBusFetchParsesMetadata(t *testing.T) {
 				<p><span>長度:</span> 120分鐘</p>
 				<p><span>製作商:</span><a>Example Studio</a></p>
 				<p><span>系列:</span><a>Example Series</a></p>
+				<p><span>演員:</span><a>Alice</a><a>Bob</a></p>
+				<a class="star-name">Alice</a>
 				<span class="genre"><a>Drama</a></span>
 				<span class="genre"><a>高清</a></span>
 			`), nil
@@ -69,6 +71,9 @@ func TestJavBusFetchParsesMetadata(t *testing.T) {
 	}
 	if metadata.DisplayTitle != "Example Title" || metadata.PosterURL != "https://www.javbus.com/pics/ssni-detail.jpg" || metadata.RuntimeMinutes != 120 || metadata.Studio != "Example Studio" || metadata.Series != "Example Series" {
 		t.Fatalf("unexpected metadata structured fields: %#v", metadata)
+	}
+	if strings.Join(metadata.Actors, ",") != "Alice,Bob" {
+		t.Fatalf("unexpected metadata actors: %#v", metadata)
 	}
 	if strings.Join(metadata.Tags, ",") != "Drama,高清" {
 		t.Fatalf("unexpected metadata tags: %#v", metadata)

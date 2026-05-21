@@ -127,7 +127,7 @@ GET /api/scrapers
 GET /api/scrapers/av/parse?number={number}
 GET /api/scrapers/av/search?number={number}&source=javdb
 GET /api/scrapers/av/search?number={number}&source=javbus
-GET /api/scrapers/av/verify?number={number}&source=auto
+GET /api/scrapers/av/verify?number={number}&source=auto&candidate_limit=3
 GET /api/scrapers/av/fetch?external_id={providerScopedId}&source=javdb
 GET /api/scrapers/av/fetch?external_id={providerScopedId}&source=javbus
 POST /api/scrapers/{provider}/candidates
@@ -140,7 +140,7 @@ GET /api/scrapers/{provider}/fetch?media_type={movie|tv|av}&external_id={externa
 - `tmdb`：电影/电视剧兜底源，配置 `TMDB_API_KEY` 与可选 `TMDB_BASE_URL` 后可用；`search` 与 `fetch` 默认只返回验证结果，不写入候选表。
 - `av/parse`：AV 番号解析和源路由验证，支持标准番号、FC2、HEYZO、CARIB/1PONDO/10MUSUME 等基础格式；只返回归一化番号和推荐抓取源顺序，不写入候选表。
 - `av/search` 与 `av/fetch`：当前默认 `source=javdb`，配置 `JAVDB_BASE_URL` 后可验证 JavDB 搜索页和详情页字段映射；详情会返回标准番号、封面、发行日期、时长、演员、片商、系列、标签等结构化字段，默认不写入候选表。
-- `av/verify`：执行解析番号、按 `source=auto` 或指定源搜索、拉取首个候选详情的完整验证闭环，返回候选和 metadata，默认不写入候选表。
+- `av/verify`：执行解析番号、按 `source=auto` 或指定源搜索、拉取候选详情的完整验证闭环，返回候选和 metadata，默认不写入候选表；`candidate_limit` 默认 3、范围 1-10，同一源首个候选详情失败时会继续尝试后续候选，并在 `source_selection.attempts[].candidate_attempts` 中返回候选级状态。
 - `source=javbus`：配置 `JAVBUS_BASE_URL` 后可验证 JavBus 搜索页和详情页字段映射；当前返回标题、年份、封面、发行日期、时长、演员、片商、系列、标签等字段，默认不写入候选表。
 - `POST /api/scrapers/{provider}/candidates`：显式把 live search/fetch/verify 中确认可用的候选保存到 `scrape_candidates`，请求必须带 `media_id` 或 `media_file_id`，会复用现有候选评分和 `match_status` 刷新逻辑。
 

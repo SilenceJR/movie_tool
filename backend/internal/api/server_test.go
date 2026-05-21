@@ -416,6 +416,75 @@ func TestVerifyAVScraperSearchesAndFetchesFirstCandidate(t *testing.T) {
 	}
 }
 
+func TestVerifyAVScraperTriesNextCandidateWhenFetchFails(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/search/SSNI-00123":
+			return jsonResponse(`
+				<a class="movie-box" href="/SSNI-00123-bad">
+					<img src="/pics/ssni-bad.jpg">
+					<div class="photo-info">SSNI-00123 Wrong Mirror</div>
+					<div>2020-02-03</div>
+				</a>
+				<a class="movie-box" href="/SSNI-00123-good">
+					<img src="/pics/ssni-good.jpg">
+					<div class="photo-info">SSNI-00123 Example Title</div>
+					<div>2020-02-03</div>
+				</a>
+			`), nil
+		case "/SSNI-00123-bad":
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Body:       io.NopCloser(strings.NewReader("bad gateway")),
+			}, nil
+		case "/SSNI-00123-good":
+			return jsonResponse(`
+				<h3>SSNI-00123 Example Title</h3>
+				<img src="/pics/ssni-detail.jpg">
+				<p><span>發行日期:</span> 2020-02-03</p>
+				<p><span>長度:</span> 120分鐘</p>
+			`), nil
+		default:
+			t.Fatalf("unexpected verify candidate retry request %s", r.URL.String())
+			return nil, nil
+		}
+	})}
+	server := NewServerWithDependencies(config.Config{Host: "127.0.0.1", Port: "0", JavBusBaseURL: "https://javbus.test"}, Dependencies{ScraperHTTP: client})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/scrapers/av/verify?number=ssni00123&source=javbus&candidate_limit=2", nil)
+	server.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200 av verify, got %d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	candidate := body["candidate"].(map[string]any)
+	if candidate["external_id"] != "javbus:/SSNI-00123-good" {
+		t.Fatalf("expected second candidate to verify, got %#v", candidate)
+	}
+	selection := body["source_selection"].(map[string]any)
+	attempts := selection["attempts"].([]any)
+	if len(attempts) != 1 {
+		t.Fatalf("expected one source attempt, got %#v", attempts)
+	}
+	attempt := attempts[0].(map[string]any)
+	if attempt["status"] != "verified" || attempt["candidate_index"] != float64(1) {
+		t.Fatalf("unexpected source attempt: %#v", attempt)
+	}
+	candidateAttempts := attempt["candidate_attempts"].([]any)
+	if len(candidateAttempts) != 2 {
+		t.Fatalf("expected two candidate attempts, got %#v", candidateAttempts)
+	}
+	firstAttempt := candidateAttempts[0].(map[string]any)
+	secondAttempt := candidateAttempts[1].(map[string]any)
+	if firstAttempt["status"] != "fetch_failed" || secondAttempt["status"] != "verified" {
+		t.Fatalf("unexpected candidate attempts: %#v", candidateAttempts)
+	}
+}
+
 func TestVerifyAVScraperAutoFallsBackToNextImplementedSource(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Host + r.URL.Path {

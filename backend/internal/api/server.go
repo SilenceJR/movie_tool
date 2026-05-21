@@ -2706,6 +2706,11 @@ func (s *Server) handleVerifyAVScraper(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotImplemented, fmt.Errorf("av source %q is not implemented yet", requested))
 		return
 	}
+	candidateLimit, err := boundedOptionalIntQuery(r, "candidate_limit", 3, 1, 10)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	attempted := make([]string, 0, len(sources))
 	attempts := make([]map[string]any, 0, len(sources))
 	var lastErr error
@@ -2728,38 +2733,57 @@ func (s *Server) handleVerifyAVScraper(w http.ResponseWriter, r *http.Request) {
 			attempts = append(attempts, attempt)
 			continue
 		}
-		metadata, err := s.fetchAVMetadata(r.Context(), source, candidates[0].ExternalID)
-		if err != nil {
-			attempt["status"] = "fetch_failed"
-			attempt["external_id"] = candidates[0].ExternalID
-			attempt["error"] = err.Error()
+		limit := candidateLimit
+		if len(candidates) < limit {
+			limit = len(candidates)
+		}
+		candidateAttempts := make([]map[string]any, 0, limit)
+		for candidateIndex := 0; candidateIndex < limit; candidateIndex++ {
+			candidate := candidates[candidateIndex]
+			candidateAttempt := map[string]any{
+				"index":       candidateIndex,
+				"external_id": candidate.ExternalID,
+			}
+			metadata, err := s.fetchAVMetadata(r.Context(), source, candidate.ExternalID)
+			if err != nil {
+				candidateAttempt["status"] = "fetch_failed"
+				candidateAttempt["error"] = err.Error()
+				candidateAttempts = append(candidateAttempts, candidateAttempt)
+				lastErr = err
+				continue
+			}
+			candidateAttempt["status"] = "verified"
+			candidateAttempts = append(candidateAttempts, candidateAttempt)
+			attempt["status"] = "verified"
+			attempt["external_id"] = candidate.ExternalID
+			attempt["candidate_index"] = candidateIndex
+			attempt["candidate_attempts"] = candidateAttempts
 			attempts = append(attempts, attempt)
-			lastErr = err
-			continue
+			selection := map[string]any{
+				"requested":                     requested,
+				"selected":                      source,
+				"attempted_sources":             attempted,
+				"attempts":                      attempts,
+				"candidate_limit":               candidateLimit,
+				"skipped_unimplemented_sources": skipped,
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"provider":         scraper.AVProvider,
+				"source":           source,
+				"media_type":       "av",
+				"persisted":        false,
+				"verified":         true,
+				"parsed":           parsed,
+				"source_selection": selection,
+				"count":            len(candidates),
+				"candidate":        candidate,
+				"metadata":         metadata,
+			})
+			return
 		}
-		attempt["status"] = "verified"
-		attempt["external_id"] = candidates[0].ExternalID
+		attempt["status"] = "fetch_failed"
+		attempt["candidate_attempts"] = candidateAttempts
 		attempts = append(attempts, attempt)
-		selection := map[string]any{
-			"requested":                     requested,
-			"selected":                      source,
-			"attempted_sources":             attempted,
-			"attempts":                      attempts,
-			"skipped_unimplemented_sources": skipped,
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"provider":         scraper.AVProvider,
-			"source":           source,
-			"media_type":       "av",
-			"persisted":        false,
-			"verified":         true,
-			"parsed":           parsed,
-			"source_selection": selection,
-			"count":            len(candidates),
-			"candidate":        candidates[0],
-			"metadata":         metadata,
-		})
-		return
 	}
 	if lastErr != nil && len(lastCandidates) == 0 {
 		writeError(w, http.StatusBadRequest, lastErr)
@@ -2781,6 +2805,7 @@ func (s *Server) handleVerifyAVScraper(w http.ResponseWriter, r *http.Request) {
 			"selected":                      selected,
 			"attempted_sources":             attempted,
 			"attempts":                      attempts,
+			"candidate_limit":               candidateLimit,
 			"skipped_unimplemented_sources": skipped,
 		},
 		"count":      len(lastCandidates),
@@ -2986,6 +3011,20 @@ func optionalIntQuery(r *http.Request, key string) (int, error) {
 		return 0, fmt.Errorf("%s must be an integer", key)
 	}
 	return parsed, nil
+}
+
+func boundedOptionalIntQuery(r *http.Request, key string, defaultValue int, minValue int, maxValue int) (int, error) {
+	value, err := optionalIntQuery(r, key)
+	if err != nil {
+		return 0, err
+	}
+	if value == 0 {
+		value = defaultValue
+	}
+	if value < minValue || value > maxValue {
+		return 0, fmt.Errorf("%s must be between %d and %d", key, minValue, maxValue)
+	}
+	return value, nil
 }
 
 func (s *Server) handleListScrapeCandidates(w http.ResponseWriter, r *http.Request) {

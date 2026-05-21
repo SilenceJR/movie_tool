@@ -2707,28 +2707,44 @@ func (s *Server) handleVerifyAVScraper(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	attempted := make([]string, 0, len(sources))
+	attempts := make([]map[string]any, 0, len(sources))
 	var lastErr error
 	var lastCandidates []scraper.Candidate
 	for _, source := range sources {
 		attempted = append(attempted, source)
+		attempt := map[string]any{"source": source}
 		candidates, err := s.searchAVCandidates(r.Context(), source, scraper.SearchQuery{MediaType: "av", Number: parsed.Normalized})
 		if err != nil {
+			attempt["status"] = "search_failed"
+			attempt["error"] = err.Error()
+			attempts = append(attempts, attempt)
 			lastErr = err
 			continue
 		}
 		lastCandidates = candidates
+		attempt["candidate_count"] = len(candidates)
 		if len(candidates) == 0 {
+			attempt["status"] = "no_candidates"
+			attempts = append(attempts, attempt)
 			continue
 		}
 		metadata, err := s.fetchAVMetadata(r.Context(), source, candidates[0].ExternalID)
 		if err != nil {
+			attempt["status"] = "fetch_failed"
+			attempt["external_id"] = candidates[0].ExternalID
+			attempt["error"] = err.Error()
+			attempts = append(attempts, attempt)
 			lastErr = err
 			continue
 		}
+		attempt["status"] = "verified"
+		attempt["external_id"] = candidates[0].ExternalID
+		attempts = append(attempts, attempt)
 		selection := map[string]any{
 			"requested":                     requested,
 			"selected":                      source,
 			"attempted_sources":             attempted,
+			"attempts":                      attempts,
 			"skipped_unimplemented_sources": skipped,
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -2764,6 +2780,7 @@ func (s *Server) handleVerifyAVScraper(w http.ResponseWriter, r *http.Request) {
 			"requested":                     requested,
 			"selected":                      selected,
 			"attempted_sources":             attempted,
+			"attempts":                      attempts,
 			"skipped_unimplemented_sources": skipped,
 		},
 		"count":      len(lastCandidates),

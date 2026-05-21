@@ -465,6 +465,18 @@ func TestVerifyAVScraperAutoFallsBackToNextImplementedSource(t *testing.T) {
 	if len(attempted) != 2 || attempted[0] != "javdb" || attempted[1] != "javbus" {
 		t.Fatalf("expected javdb then javbus attempts, got %#v", attempted)
 	}
+	attempts := selection["attempts"].([]any)
+	if len(attempts) != 2 {
+		t.Fatalf("expected two detailed attempts, got %#v", attempts)
+	}
+	firstAttempt := attempts[0].(map[string]any)
+	secondAttempt := attempts[1].(map[string]any)
+	if firstAttempt["source"] != "javdb" || firstAttempt["status"] != "no_candidates" || firstAttempt["candidate_count"] != float64(0) {
+		t.Fatalf("unexpected first attempt: %#v", firstAttempt)
+	}
+	if secondAttempt["source"] != "javbus" || secondAttempt["status"] != "verified" || secondAttempt["external_id"] != "javbus:/SSNI-00123" {
+		t.Fatalf("unexpected second attempt: %#v", secondAttempt)
+	}
 }
 
 func TestSearchAVScraperUsesJavBus(t *testing.T) {
